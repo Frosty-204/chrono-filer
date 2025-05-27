@@ -29,6 +29,7 @@ MANIFEST
 .idea/
 *.swp
 *.swo
+*.zed/
 
 # Qt specific (if any generated files appear)
 # For example, if you use Qt Designer .ui files and compile them
