@@ -1,0 +1,21 @@
+// pyrightconfig.json
+{
+  "executionEnvironments": [
+    {
+      "root": ".", // This means your project root directory
+      "pythonVersion": "3.13.3", // << IMPORTANT: Set your Python version, e.g., "3.10"
+      "pythonPath": "./venv/bin/python", // Path to Python interpreter in venv
+      "extraPaths": [
+        "./src" // Helps Pyright find imports from your 'src' directory
+      ]
+    }
+  ],
+  // You can also keep these if they help Zed's broader venv discovery
+  "venvPath": ".",
+  "venv": "venv",
+  "include": [
+    "src" // Tell Pyright to analyze files in the src directory
+  ],
+  "reportMissingImports": true, // Keep this true
+  "pythonPlatform": "Linux" // Optional, but can sometimes help
+}
