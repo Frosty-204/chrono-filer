@@ -1,9 +1,10 @@
 # src/widgets.py
 import os
-import pathlib # For easier path manipulation
-import datetime # For formatting dates
-import mimetypes # For guessing file types
-
+import pathlib
+import datetime
+import mimetypes
+from dataclasses import dataclass, field
+from typing import Optional, List
 
 from PySide6.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QHBoxLayout,
@@ -12,11 +13,24 @@ from PySide6.QtWidgets import (
     QSizePolicy, QSpacerItem, QStackedWidget,QGroupBox, QFormLayout, QComboBox, QDateEdit, QSpinBox,
         QCheckBox, QScrollArea # Added QStackedWidget
 )
-from PySide6.QtGui import QPalette, QColor, QPixmap, QPainter
-# Added QPixmap, QPainter
-from PySide6.QtCore import Qt, QDir, Signal # QDir for path operations
+from PySide6.QtGui import QPalette, QColor, QPixmap
 
-# PlaceholderWidget remains the same for other panels for now
+from PySide6.QtCore import Qt, Signal
+
+@dataclass
+class OrganizationSettings:
+    name_filter_text: str = ""
+    name_filter_type: str = "Contains" # "Starts with", "Ends with", "Exact match", "Regex"
+    type_filter_text: str = "" # Comma-separated extensions or mimetypes
+    created_after_date: Optional[datetime.date] = None
+    modified_before_date: Optional[datetime.date] = None
+    size_min_kb: int = 0
+    size_max_kb: int = (1024 * 1024) # Default: 1GB in KB (from previous spinbox max)
+
+    structure_template: str = "[YYYY]/[MM]/[Filename].[Ext]"
+    conflict_resolution: str = "Skip" # "Overwrite", "Rename with Suffix"
+    dry_run: bool = True
+
 class PlaceholderWidget(QWidget):
     def __init__(self, name, color_name="lightgray", parent=None):
         super().__init__(parent)
@@ -381,8 +395,10 @@ class PreviewPanel(QWidget):
             self.unsupported_label.setText(f"Preview not available for '{path_obj.name}'\n(Type: {mime_type or 'Unknown'})")
             self.stacked_widget.setCurrentWidget(self.unsupported_label)
 
-# OrganizationConfigPanel remains a placeholder for now
 class OrganizationConfigPanel(QWidget):
+    # Define a signal that will carry the OrganizationSettings object
+    organize_triggered = Signal(OrganizationSettings) # type: ignore
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.main_layout = QVBoxLayout(self)
@@ -482,5 +498,56 @@ class OrganizationConfigPanel(QWidget):
 
         # Add a spacer at the bottom of the container to push content up if scroll area is larger
         container_layout.addStretch(1)
-
+        self.setLayout(self.main_layout)
         # TODO: Connect signals from these widgets (e.g., organize_button.clicked)
+        self.organize_button.clicked.connect(self._on_organize_clicked)
+
+    def _on_organize_clicked(self):
+                settings = self.get_current_settings()
+                self.organize_triggered.emit(settings)
+
+    def get_current_settings(self) -> OrganizationSettings:
+                name_text = self.name_filter_text.text().strip()
+                name_type = self.name_filter_type.currentText()
+                type_text = self.type_filter_text.text().strip()
+
+                # QDateEdit.date() returns QDate. Convert to datetime.date
+                # Only use the date if it's different from the "ignore" default
+                created_val = self.created_after_date.date().toPython()
+                created_after = created_val if created_val != datetime.date(1970, 1, 1) else None
+
+                modified_val = self.modified_before_date.date().toPython()
+                modified_before = modified_val if modified_val != datetime.date.today() else None
+
+                size_min = self.size_min_spinbox.value()
+                size_max = self.size_max_spinbox.value()
+
+                # If max is at its ceiling and min is at its floor, effectively no size filter from user.
+                # However, it's better to let the engine handle 0 as "no min" and a very large number or a flag as "no max".
+                # Let's pass them as is, and the engine can interpret.
+                # If size_max is set to the spinbox's maximum, it could mean "no upper limit".
+                if size_max == self.size_max_spinbox.maximum():
+                    actual_size_max = -1 # Use -1 to signify no upper bound for the engine
+                else:
+                    actual_size_max = size_max
+
+
+                structure = self.structure_template_edit.text().strip()
+                if not structure:
+                    structure = "[YYYY]/[MM]/[Filename].[Ext]" # Default if user clears it
+
+                conflict = self.conflict_resolution_combo.currentText()
+                dry_run = self.dry_run_checkbox.isChecked()
+
+                return OrganizationSettings(
+                    name_filter_text=name_text,
+                    name_filter_type=name_type,
+                    type_filter_text=type_text,
+                    created_after_date=created_after,
+                    modified_before_date=modified_before,
+                    size_min_kb=size_min, # Pass as is
+                    size_max_kb=actual_size_max, # Pass interpreted max
+                    structure_template=structure,
+                    conflict_resolution=conflict,
+                    dry_run=dry_run
+                )
