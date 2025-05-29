@@ -17,28 +17,33 @@ FileBrowserPanel,
 PreviewPanel,
 MetadataPanel,
 OrganizationConfigPanel,
-OrganizationSettings
+OrganizationSettings,
+DryRunResultsDialog
 )
 
-# from engine import OrganizationEngine # This will be uncommented once engine.py is created
+from engine import OrganizationEngine # This will be uncommented once engine.py is created
 
 # --- TEMPORARY Placeholder for OrganizationEngine ---
-class OrganizationEngine:
-    def __init__(self, settings: OrganizationSettings, source_directory: pathlib.Path):
-        self.settings = settings
-        self.source_directory = source_directory
-        print(f"TEMP: OrganizationEngine initialized for '{source_directory}' with settings: {settings}")
+# class OrganizationEngine:
+#     def __init__(self, settings: OrganizationSettings, source_directory: pathlib.Path):
+#         self.settings = settings
+#         self.source_directory = source_directory
+#         print(f"TEMP: OrganizationEngine initialized for '{source_directory}' with settings: {settings}")
 
-    def process_files(self) -> List[Tuple[pathlib.Path, pathlib.Path, str]]:
-        print(f"TEMP: OrganizationEngine.process_files() called. Dry Run: {self.settings.dry_run}")
-        # Simulate some results for testing the dialog
-        if self.settings.dry_run:
-             return [
-                 (self.source_directory / "file1.txt", self.source_directory / "2023/01/file1.txt", "To be moved"),
-                 (self.source_directory / "image.jpg", self.source_directory / "2023/01/image.jpg", "Conflict: To be renamed"),
-                 (self.source_directory / "skip_me.doc", self.source_directory / "skip_me.doc", "Skipped: No match")
-             ]
-        return []
+#     def process_files(self) -> List[Tuple[pathlib.Path, pathlib.Path, str]]:
+#         print(f"TEMP: OrganizationEngine.process_files() called. Dry Run: {self.settings.dry_run}")
+#         # Simulate some results for testing the dialog
+#         if self.settings.dry_run:
+#             # Use more realistic paths for dialog testing
+#                          base = self.source_directory
+#                          return [
+#                              (base / "source_file1.txt", base / self.settings.structure_template.split('/')[0] / "file1_moved.txt", "To be moved"),
+#                              (base / "image_to_rename.jpg", base / "conflict_dir" / "image_to_rename.jpg", "Conflict: To be renamed to image_to_rename_1.jpg"),
+#                              (base / "document_to_skip.docx", base / "existing_folder" / "document_to_skip.docx", "Skipped: Target exists"),
+#                              (base / "another.png", base / "Photos" / "2023" / "another.png", "To be moved"),
+#                              (base / "archive.zip", base / "Archives" / "archive.zip", "To be moved")
+#                          ]
+#         return []
 # --- END TEMPORARY Placeholder ---
 
 
@@ -46,7 +51,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        self.setWindowTitle("Chrono Filer - v0.0.6") # Version bump
+        self.setWindowTitle("Chrono Filer - v0.0.7") # Version bump
         self.setGeometry(100, 100, 1280, 800) # Slightly wider for comfort
 
         self._create_panels()
@@ -165,33 +170,28 @@ class MainWindow(QMainWindow):
 
         if settings.dry_run:
             self.statusBar().showMessage(f"Dry run complete. {len(results)} potential actions proposed.", 10000)
-            self._show_dry_run_results_dialog(results) # Changed to a dialog method
+            self._show_dry_run_results_dialog(results, source_directory)
         else:
             # For actual run, we might want to refresh the file browser
             self.statusBar().showMessage(f"Organization complete. {len(results)} actions performed.", 10000)
             QMessageBox.information(self, "Organization Complete", f"{len(results)} actions were performed.")
             self.file_browser_panel.refresh_list() # Refresh browser after actual changes
 
-    def _show_dry_run_results_dialog(self, results: List[Tuple[pathlib.Path, pathlib.Path, str]]):
+    def _show_dry_run_results_dialog(self, results: List[Tuple[pathlib.Path, pathlib.Path, str]], source_directory: pathlib.Path):
         if not results:
-            QMessageBox.information(self, "Dry Run Results", "No files matched the criteria or no actions proposed.")
-            return
+                QMessageBox.information(self, "Dry Run Results", "No files matched the criteria or no actions proposed.")
+                return
+
+        # Instantiate and show the new dialog
+        dialog = DryRunResultsDialog(results, source_directory, self) # Pass parent=self
+        dialog.exec() # Use exec() for modal dialogs
+
 
         # For now, just print. We'll build a dialog in the next step.
-        print("\n--- DRY RUN RESULTS (Dialog Placeholder) ---")
-        for source, target, status in results:
-            print(f"[{status}] {source.name}  ==>  {target}")
-        print("-------------------------------------------\n")
-
-        # Simple message box as a placeholder for the dialog
-        summary = f"{len(results)} potential actions identified:\n\n"
-        for i, (s, t, stat) in enumerate(results):
-            if i < 10: # Show first 10
-                 summary += f"- {s.name} -> {t.name} ({stat})\n"
-            elif i == 10:
-                 summary += "\n...and more."
-                 break
-        QMessageBox.information(self, "Dry Run Proposed Changes", summary)
+        # print("\n--- DRY RUN RESULTS (Dialog Placeholder) ---")
+        # for source, target, status in results:
+        #     print(f"[{status}] {source.name}  ==>  {target}")
+        # print("-------------------------------------------\n")
 
 
 if __name__ == "__main__":

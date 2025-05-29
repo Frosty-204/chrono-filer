@@ -3,6 +3,7 @@ import pathlib
 import datetime
 import os
 import re
+import mimetypes
 import shutil # For actual file operations
 from typing import List, Tuple, Optional
 
@@ -81,80 +82,116 @@ class OrganizationEngine:
         return proposed_actions
 
     def _matches_filters(self, file_path: pathlib.Path) -> bool:
-        # Name Filter
-        if self.settings.name_filter_text:
-            name_text = self.settings.name_filter_text
-            # Case sensitivity for exact match and regex, case-insensitivity for others
-            file_name_for_compare = file_path.name
-            name_text_for_compare = name_text
+            # Name Filter
+            if self.settings.name_filter_text:
+                name_text = self.settings.name_filter_text
+                file_name_for_compare = file_path.name
+                name_text_for_compare = name_text
 
-            match_mode = self.settings.name_filter_type
-            if match_mode in ["Contains", "Starts with", "Ends with"]:
-                file_name_for_compare = file_path.name.lower()
-                name_text_for_compare = name_text.lower()
+                match_mode = self.settings.name_filter_type
+                if match_mode in ["Contains", "Starts with", "Ends with"]:
+                    file_name_for_compare = file_path.name.lower()
+                    name_text_for_compare = name_text.lower()
 
-            if match_mode == "Contains" and name_text_for_compare not in file_name_for_compare: return False
-            if match_mode == "Starts with" and not file_name_for_compare.startswith(name_text_for_compare): return False
-            if match_mode == "Ends with" and not file_name_for_compare.endswith(name_text_for_compare): return False
-            if match_mode == "Exact match" and file_path.name != name_text: return False # Case sensitive exact
-            if match_mode == "Regex":
-                try:
-                    if not re.search(name_text, file_path.name): return False
-                except re.error as e:
-                    print(f"Warning: Invalid regex '{name_text}': {e}")
+                if match_mode == "Contains" and name_text_for_compare not in file_name_for_compare: return False
+                if match_mode == "Starts with" and not file_name_for_compare.startswith(name_text_for_compare): return False
+                if match_mode == "Ends with" and not file_name_for_compare.endswith(name_text_for_compare): return False
+                if match_mode == "Exact match" and file_path.name != name_text: return False # Case sensitive exact
+                if match_mode == "Regex":
+                    try:
+                        if not re.search(name_text, file_path.name): return False
+                    except re.error as e:
+                        print(f"Warning: Invalid regex '{name_text}': {e}") # Good to have a warning
+                        return False # Treat invalid regex as no match for this file
+
+            # Type Filter
+            if self.settings.type_filter_text:
+                allowed_types_input = [t.strip().lower() for t in self.settings.type_filter_text.split(',') if t.strip()]
+                file_ext_lower = file_path.suffix.lower() # e.g., ".txt"
+
+                # Also get MIME type for more robust checking
+                mime_type_guess, _ = mimetypes.guess_type(file_path)
+                mime_type_lower = mime_type_guess.lower() if mime_type_guess else ""
+
+                match_found = False
+                for t_input in allowed_types_input:
+                    if not t_input: continue # Skip empty strings from multiple commas
+
+                    # Check against extension (e.g. ".jpg" or "jpg")
+                    if (t_input.startswith('.') and file_ext_lower == t_input) or \
+                       (not t_input.startswith('.') and file_ext_lower.lstrip('.') == t_input):
+                        match_found = True
+                        break
+                    # Check against MIME type (e.g. "image/jpeg")
+                    if mime_type_lower and t_input in mime_type_lower: # "jpeg" in "image/jpeg" or "image/jpeg" in "image/jpeg"
+                        match_found = True
+                        break
+                if not match_found:
                     return False
 
-        # Type Filter
-        if self.settings.type_filter_text:
-            allowed_types_input = [t.strip().lower() for t in self.settings.type_filter_text.split(',') if t.strip()]
-            file_ext_lower = file_path.suffix.lower() # e.g., ".txt"
-
-            match_found = False
-            for t_input in allowed_types_input:
-                # Match if "txt" == "txt" (from ".txt") or ".txt" == ".txt"
-                if (t_input.startswith('.') and file_ext_lower == t_input) or \
-                   (not t_input.startswith('.') and file_ext_lower.lstrip('.') == t_input):
-                    match_found = True
-                    break
-            if not match_found:
-                 # TODO: Add mimetype check as an OR condition if desired
-                return False
-
-        # Date Filters
-        try:
-            stat_info = file_path.stat()
-            # Using st_mtime (modification time) for date filters is generally more consistent
+            # Date Filters
+            # Using st_mtime (modification time) for consistency.
             # st_ctime is creation on Windows, metadata change on Unix/Linux
-            file_date = datetime.datetime.fromtimestamp(stat_info.st_mtime).date()
-
-            if self.settings.created_after_date and file_date < self.settings.created_after_date:
-                return False
-            if self.settings.modified_before_date and file_date >= self.settings.modified_before_date:
-                # If modified_before_date is 2023-01-15, we want files *strictly before* this date.
-                # So, if file_date is 2023-01-15 or later, it does NOT match.
-                return False
-        except OSError: return False # File might have vanished
-
-        # Size Filters (comparing KB with KB)
-        # self.settings.size_max_kb == -1 means no upper limit
-        if self.settings.size_min_kb > 0 or self.settings.size_max_kb != -1:
             try:
-                size_bytes = file_path.stat().st_size
-                size_kb = size_bytes / 1024.0
+                stat_info = file_path.stat()
+                file_mod_date = datetime.datetime.fromtimestamp(stat_info.st_mtime).date()
 
-                if self.settings.size_min_kb > 0 and size_kb < self.settings.size_min_kb:
-                    return False
-                if self.settings.size_max_kb != -1 and size_kb > self.settings.size_max_kb:
-                    return False
-            except OSError: return False # File might have vanished
+                if self.settings.created_after_date: # This is semantically "Modified After" due to using st_mtime
+                                                     # If true creation date is needed, it's more complex and OS-specific
+                    if file_mod_date < self.settings.created_after_date:
+                        return False
 
-        return True
+                if self.settings.modified_before_date:
+                    if file_mod_date >= self.settings.modified_before_date:
+                        # If modified_before_date is 2023-01-15, we want files *strictly before* this date.
+                        # So, if file_mod_date is 2023-01-15 or later, it does NOT match.
+                        return False
+            except OSError: return False # File might have vanished or permissions issue
+
+            # Size Filters (comparing KB with KB)
+            # self.settings.size_max_kb == -1 means no upper limit
+            if self.settings.size_min_kb > 0 or self.settings.size_max_kb != -1:
+                try:
+                    size_bytes = file_path.stat().st_size # Re-fetch stat_info if not already fetched, or pass it
+                    size_kb = size_bytes / 1024.0
+
+                    if self.settings.size_min_kb > 0 and size_kb < self.settings.size_min_kb:
+                        return False
+                    # Ensure size_max_kb is only checked if it's not the "no limit" sentinel
+                    if self.settings.size_max_kb != -1 and size_kb > self.settings.size_max_kb:
+                        return False
+                except OSError: return False # File might have vanished
+
+            return True
+
+    def _get_detected_file_type_category(self, source_file: pathlib.Path) -> str:
+        mime_type_guess, _ = mimetypes.guess_type(str(source_file))
+        if mime_type_guess:
+            mime_main = mime_type_guess.split('/')[0].lower()
+            if mime_main == "image": return "Images"
+            if mime_main == "text": return "TextFiles" # Or "Documents" if preferred for .txt, .md
+            if mime_main == "application":
+                if "pdf" in mime_type_guess: return "Documents"
+                if "zip" in mime_type_guess or "tar" in mime_type_guess or "rar" in mime_type_guess or "7z" in mime_type_guess: return "Archives"
+                if "msword" in mime_type_guess or "officedocument" in mime_type_guess: return "Documents" # .doc, .docx etc.
+                # Add more application types if needed
+                return "Applications" # Generic for other apps
+            if mime_main == "video": return "Videos"
+            if mime_main == "audio": return "Audio"
+        # Fallback for unknown or simple extension check
+        ext = source_file.suffix.lower()
+        if ext in ['.doc', '.docx', '.odt', '.rtf', '.txt', '.md', '.pdf']: return "Documents"
+        if ext in ['.xls', '.xlsx', '.ods', '.csv']: return "Spreadsheets"
+        if ext in ['.ppt', '.pptx', '.odp']: return "Presentations"
+
+        return "Other"
+
 
     def _calculate_target_path_relative(self, source_file: pathlib.Path) -> pathlib.Path:
-        """Calculates the target path relative to the base output directory."""
         template = self.settings.structure_template
 
         stat_info = source_file.stat()
+        # Use st_mtime consistently for template dates as it's used in filters
         time_for_template = datetime.datetime.fromtimestamp(stat_info.st_mtime)
 
         year = str(time_for_template.year)
@@ -170,14 +207,24 @@ class OrganizationEngine:
         path_str = path_str.replace("[Filename]", filename_stem)
         path_str = path_str.replace("[Ext]", extension)
 
+        # Handle [DetectedFileType]
+        if "[DetectedFileType]" in path_str:
+            detected_type_category = self._get_detected_file_type_category(source_file)
+            path_str = path_str.replace("[DetectedFileType]", detected_type_category)
+
         # Regex Group replacement
+        # ... (this part remains the same) ...
         if "[RegexGroup" in path_str and self.settings.name_filter_type == "Regex" and self.settings.name_filter_text:
             try:
                 match = re.search(self.settings.name_filter_text, source_file.name)
                 if match:
                     groups = match.groups() # Returns a tuple of all subgroups
                     for i, group_val in enumerate(groups):
-                        path_str = path_str.replace(f"[RegexGroup{i+1}]", group_val if group_val is not None else "")
-            except re.error: pass # Already handled in filter
+                        if group_val is not None: # Only replace if group captured something
+                             path_str = path_str.replace(f"[RegexGroup{i+1}]", group_val)
+                        else: # If group didn't capture, remove the placeholder or replace with empty
+                             path_str = path_str.replace(f"[RegexGroup{i+1}]", "")
+            except re.error: pass
+
 
         return pathlib.Path(path_str)

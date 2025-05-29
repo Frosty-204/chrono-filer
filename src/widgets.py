@@ -4,14 +4,17 @@ import pathlib
 import datetime
 import mimetypes
 from dataclasses import dataclass, field
-from typing import Optional, List
+from typing import Optional, List, Tuple
 
 from PySide6.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QHBoxLayout,
     QLineEdit, QPushButton, QListWidget, QListWidgetItem,
-    QStyle, QGridLayout, QTextEdit, QScrollArea, # Added QTextEdit, QScrollArea
-    QSizePolicy, QSpacerItem, QStackedWidget,QGroupBox, QFormLayout, QComboBox, QDateEdit, QSpinBox,
-        QCheckBox, QScrollArea # Added QStackedWidget
+    QStyle, QGridLayout, QTextEdit, QScrollArea,
+    QSizePolicy, QSpacerItem, QStackedWidget,
+    QGroupBox, QFormLayout, QComboBox, QDateEdit,
+    QSpinBox, QCheckBox, QScrollArea, QDialog,
+    QTableWidget, QTableWidgetItem, QAbstractItemView, QHeaderView,
+    QDialogButtonBox, QMessageBox
 )
 from PySide6.QtGui import QPalette, QColor, QPixmap
 
@@ -399,6 +402,13 @@ class OrganizationConfigPanel(QWidget):
     # Define a signal that will carry the OrganizationSettings object
     organize_triggered = Signal(OrganizationSettings) # type: ignore
 
+    PRESET_TEMPLATES = {
+        "Custom": "", # Special value, means use QLineEdit directly
+        "Year/Month/Filename": "[YYYY]/[MM]/[Filename].[Ext]",
+        "Year-Month-Day/Filename": "[YYYY]-[MM]-[DD]/[Filename].[Ext]",
+        "File Type/Year/Filename": "[DetectedFileType]/[YYYY]/[Filename].[Ext]", # We'll need to handle [DetectedFileType]
+        "Capture Group 1/Filename (Regex)": "[RegexGroup1]/[Filename].[Ext]",
+    }
     def __init__(self, parent=None):
         super().__init__(parent)
         self.main_layout = QVBoxLayout(self)
@@ -467,13 +477,30 @@ class OrganizationConfigPanel(QWidget):
 
         # --- Output Structure Group ---
         output_group = QGroupBox("Output Directory Structure")
-        output_layout = QFormLayout(output_group)
+        output_layout = QVBoxLayout(output_group) # Change to QVBoxLayout for more flexibility
 
+        # Preset ComboBox
+        self.structure_preset_combo = QComboBox()
+        self.structure_preset_combo.addItems(list(self.PRESET_TEMPLATES.keys()))
+        output_layout.addWidget(self.structure_preset_combo)
+
+        # Template Edit Line and Info Button
+        template_edit_layout = QHBoxLayout()
         self.structure_template_edit = QLineEdit()
-        self.structure_template_edit.setPlaceholderText("e.g., [YYYY]/[MM]/[DD]-[Filename]")
-        self.structure_template_edit.setText("[YYYY]/[MM]/[Filename].[Ext]") # A sensible default
-        output_layout.addRow("Structure Template:", self.structure_template_edit)
+        self.structure_template_edit.setPlaceholderText("Define custom structure or see preset")
+        # Set default text based on a default preset
+        default_preset_key = "Year/Month/Filename"
+        self.structure_template_edit.setText(self.PRESET_TEMPLATES.get(default_preset_key, "[YYYY]/[MM]/[Filename].[Ext]"))
+        self.structure_preset_combo.setCurrentText(default_preset_key) # Sync combobox
 
+        template_edit_layout.addWidget(self.structure_template_edit)
+
+        self.template_info_button = QPushButton()
+        self.template_info_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxInformation))
+        self.template_info_button.setToolTip("Show available template placeholders")
+        template_edit_layout.addWidget(self.template_info_button)
+
+        output_layout.addLayout(template_edit_layout)
         container_layout.addWidget(output_group)
 
         # --- Actions Group ---
@@ -499,8 +526,45 @@ class OrganizationConfigPanel(QWidget):
         # Add a spacer at the bottom of the container to push content up if scroll area is larger
         container_layout.addStretch(1)
         self.setLayout(self.main_layout)
-        # TODO: Connect signals from these widgets (e.g., organize_button.clicked)
+
         self.organize_button.clicked.connect(self._on_organize_clicked)
+
+        # added dropdown
+        self.structure_preset_combo.currentTextChanged.connect(self._on_structure_preset_changed)
+        self.template_info_button.clicked.connect(self._show_template_info)
+
+        # Initial state for template edit based on "Custom" or other preset
+        self._on_structure_preset_changed(self.structure_preset_combo.currentText())
+
+
+    def _on_structure_preset_changed(self, preset_name: str):
+        template = self.PRESET_TEMPLATES.get(preset_name, "")
+        if preset_name == "Custom":
+            self.structure_template_edit.setEnabled(True)
+            # Optionally, you might want to clear it or leave the last custom/preset value
+            # self.structure_template_edit.clear()
+        else:
+            self.structure_template_edit.setText(template)
+            self.structure_template_edit.setEnabled(False) # Disable editing for presets
+
+    def _show_template_info(self):
+        info_text = """
+        <b>Available Placeholders for Structure Template:</b><br><br>
+        - <code>[YYYY]</code>: Full year (e.g., 2023)<br>
+        - <code>[MM]</code>: Month with leading zero (e.g., 01, 12)<br>
+        - <code>[DD]</code>: Day of month with leading zero (e.g., 05, 31)<br>
+        - <code>[Filename]</code>: Original filename without extension<br>
+        - <code>[Ext]</code>: Original file extension (without the dot)<br>
+        - <code>[RegexGroup1]</code>, <code>[RegexGroup2]</code>, etc.:<br>
+             Corresponds to the 1st, 2nd, etc. capture group from the<br>
+             'Name' filter if 'Regex' mode is selected.<br>
+        - <code>[DetectedFileType]</code>: A general category for the file type<br>
+             (e.g., "Images", "Documents", "Videos", "Audio", "Archives", "Other").<br>
+             <i>(Based on MIME type)</i><br><br>
+        Example: <code>[YYYY]/[MM]/[MyPrefix]-[Filename].[Ext]</code>
+        """
+        QMessageBox.information(self, "Structure Template Info", info_text)
+
 
     def _on_organize_clicked(self):
                 settings = self.get_current_settings()
@@ -533,8 +597,11 @@ class OrganizationConfigPanel(QWidget):
 
 
                 structure = self.structure_template_edit.text().strip()
-                if not structure:
-                    structure = "[YYYY]/[MM]/[Filename].[Ext]" # Default if user clears it
+                if not structure and self.structure_preset_combo.currentText() != "Custom":
+                            # If QLineEdit is empty but a non-custom preset is selected, re-fetch from preset
+                            structure = self.PRESET_TEMPLATES.get(self.structure_preset_combo.currentText(), "[YYYY]/[MM]/[Filename].[Ext]")
+                elif not structure and self.structure_preset_combo.currentText() == "Custom":
+                            structure = "[YYYY]/[MM]/[Filename].[Ext]" # Fallback if custom is empty
 
                 conflict = self.conflict_resolution_combo.currentText()
                 dry_run = self.dry_run_checkbox.isChecked()
@@ -551,3 +618,71 @@ class OrganizationConfigPanel(QWidget):
                     conflict_resolution=conflict,
                     dry_run=dry_run
                 )
+
+class DryRunResultsDialog(QDialog):
+    def __init__(self, results: List[Tuple[pathlib.Path, pathlib.Path, str]], source_directory: pathlib.Path, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Dry Run - Proposed Changes")
+        self.setMinimumSize(800, 400) # Give it a reasonable default size
+        self.setModal(True) # Make it modal
+
+        self.source_dir = source_directory.resolve() # Store for making paths relative
+
+        layout = QVBoxLayout(self)
+
+        # Table to display results
+        self.table_widget = QTableWidget()
+        self.table_widget.setColumnCount(3)
+        self.table_widget.setHorizontalHeaderLabels(["Original File", "Proposed Location", "Action/Status"])
+        self.table_widget.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers) # Read-only
+        self.table_widget.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table_widget.setAlternatingRowColors(True)
+
+        # Populate table
+        self.table_widget.setRowCount(len(results))
+        for row, (source_path, target_path, status) in enumerate(results):
+            try:
+                # Try to make paths relative to the source directory for readability
+                # If target is outside source_dir (e.g. different base output dir), show full path
+
+                source_display = str(source_path.relative_to(self.source_dir)) \
+                                 if source_path.is_relative_to(self.source_dir) \
+                                 else str(source_path)
+
+                target_display = str(target_path.relative_to(self.source_dir)) \
+                                 if target_path.is_relative_to(self.source_dir) \
+                                 else str(target_path)
+
+            except ValueError: # Fallback if relative_to fails (e.g. different drives on Windows)
+                source_display = str(source_path)
+                target_display = str(target_path)
+
+
+            self.table_widget.setItem(row, 0, QTableWidgetItem(source_display))
+            self.table_widget.setItem(row, 1, QTableWidgetItem(target_display))
+            self.table_widget.setItem(row, 2, QTableWidgetItem(status))
+
+        # Resize columns to content, but allow interactive resize
+        self.table_widget.resizeColumnsToContents()
+        self.table_widget.horizontalHeader().setStretchLastSection(True) # Make last column fill space
+        # Or, for more control:
+        # self.table_widget.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        # self.table_widget.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        # self.table_widget.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
+        # self.table_widget.setColumnWidth(0, 250)
+        # self.table_widget.setColumnWidth(1, 350)
+        # self.table_widget.setColumnWidth(2, 150)
+
+
+        layout.addWidget(self.table_widget)
+
+        # Buttons
+        button_layout = QHBoxLayout()
+        button_layout.addStretch() # Push buttons to the right
+
+        self.ok_button = QPushButton("OK")
+        self.ok_button.clicked.connect(self.accept) # QDialog.accept() closes and returns QDialog.Accepted
+        button_layout.addWidget(self.ok_button)
+
+        layout.addLayout(button_layout)
+        self.setLayout(layout)
