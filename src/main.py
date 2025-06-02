@@ -7,7 +7,8 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QSplitter,
     QTabWidget,
-    QMessageBox
+    QMessageBox,
+    QProgressDialog
 )
 from PySide6.QtCore import Qt, QSize
 from typing import List, Tuple
@@ -21,37 +22,14 @@ OrganizationSettings,
 DryRunResultsDialog
 )
 
-from engine import OrganizationEngine # This will be uncommented once engine.py is created
-
-# --- TEMPORARY Placeholder for OrganizationEngine ---
-# class OrganizationEngine:
-#     def __init__(self, settings: OrganizationSettings, source_directory: pathlib.Path):
-#         self.settings = settings
-#         self.source_directory = source_directory
-#         print(f"TEMP: OrganizationEngine initialized for '{source_directory}' with settings: {settings}")
-
-#     def process_files(self) -> List[Tuple[pathlib.Path, pathlib.Path, str]]:
-#         print(f"TEMP: OrganizationEngine.process_files() called. Dry Run: {self.settings.dry_run}")
-#         # Simulate some results for testing the dialog
-#         if self.settings.dry_run:
-#             # Use more realistic paths for dialog testing
-#                          base = self.source_directory
-#                          return [
-#                              (base / "source_file1.txt", base / self.settings.structure_template.split('/')[0] / "file1_moved.txt", "To be moved"),
-#                              (base / "image_to_rename.jpg", base / "conflict_dir" / "image_to_rename.jpg", "Conflict: To be renamed to image_to_rename_1.jpg"),
-#                              (base / "document_to_skip.docx", base / "existing_folder" / "document_to_skip.docx", "Skipped: Target exists"),
-#                              (base / "another.png", base / "Photos" / "2023" / "another.png", "To be moved"),
-#                              (base / "archive.zip", base / "Archives" / "archive.zip", "To be moved")
-#                          ]
-#         return []
-# --- END TEMPORARY Placeholder ---
-
+from engine import OrganizationEngine
+from worker import OrganizationWorker
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        self.setWindowTitle("Chrono Filer - v0.0.7") # Version bump
+        self.setWindowTitle("Chrono Filer - v0.0.9") # Version bump
         self.setGeometry(100, 100, 1280, 800) # Slightly wider for comfort
 
         self._create_panels()
@@ -59,8 +37,9 @@ class MainWindow(QMainWindow):
         self._create_status_bar()
         self._create_main_layout()
         self._connect_signals()
-        # self._create_dock_widgets() # We are removing the dock for OrganizationConfigPanel
 
+        self.organization_worker = None
+        self.progress_dialog = None
 
     def _create_panels(self):
         self.file_browser_panel = FileBrowserPanel()
@@ -148,50 +127,122 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(main_splitter)
 
-    # def _create_dock_widgets(self):
-    #     # This method is no longer needed for the OrganizationConfigPanel
     def on_start_organization(self, settings: OrganizationSettings):
-        current_browse_path_str = self.file_browser_panel.current_path
-        source_directory = pathlib.Path(current_browse_path_str)
+           print(f"DEBUG MAINWINDOW: Received settings with target_base_directory: {settings.target_base_directory}") # DBG
+           current_browse_path_str = self.file_browser_panel.current_path
+           source_directory = pathlib.Path(current_browse_path_str)
 
-        if not source_directory.is_dir():
-            self.statusBar().showMessage(f"Error: Source path '{source_directory.name}' is not a valid directory.", 5000)
-            QMessageBox.critical(self, "Error", f"The selected source path '{source_directory}' is not a valid directory.")
-            return
+           if not source_directory.is_dir():
+               QMessageBox.critical(self, "Error", f"The selected source path '{source_directory}' is not a valid directory.")
+               return
 
-        self.statusBar().showMessage(f"Processing: {source_directory.name} (Dry Run: {settings.dry_run})...", 3000)
-        print(f"Organization started for: {source_directory}") # For debugging
-        print(f"Using settings: {settings}")
+           effective_output_base = settings.target_base_directory.resolve() if settings.target_base_directory else source_directory.resolve()
 
-        # Instantiate and run the engine
-        # from engine import OrganizationEngine # This will be at the top of the file later
-        engine = OrganizationEngine(settings, source_directory)
-        results = engine.process_files()
+           if settings.target_base_directory:
+                if not settings.target_base_directory.exists() and not settings.dry_run:
+                # Attempt to create it if it doesn't exist for actual run (engine also does this, but good for early check)
+                    try:
+                        settings.target_base_directory.mkdir(parents=True, exist_ok=True)
+                    except Exception as e:
+                        QMessageBox.critical(self, "Error", f"Cannot create target directory '{settings.target_base_directory}': {e}")
+                    return
+                elif settings.target_base_directory.exists() and not settings.target_base_directory.is_dir():
+                    QMessageBox.critical(self, "Error", f"Target path '{settings.target_base_directory}' exists but is not a directory.")
+                    return
 
-        if settings.dry_run:
-            self.statusBar().showMessage(f"Dry run complete. {len(results)} potential actions proposed.", 10000)
-            self._show_dry_run_results_dialog(results, source_directory)
-        else:
-            # For actual run, we might want to refresh the file browser
-            self.statusBar().showMessage(f"Organization complete. {len(results)} actions performed.", 10000)
-            QMessageBox.information(self, "Organization Complete", f"{len(results)} actions were performed.")
-            self.file_browser_panel.refresh_list() # Refresh browser after actual changes
+           if settings.dry_run:
+                self.statusBar().showMessage(f"Performing Dry Run on: {source_directory.name}...", 3000)
+                engine = OrganizationEngine(settings, source_directory)
+                dry_run_results = []
+                files_to_check_dry_run = [item for item in source_directory.iterdir() if item.is_file()]
+                if not files_to_check_dry_run:
+                    QMessageBox.information(self, "Dry Run Results", "No files found in source directory to process.")
+                    self.statusBar().showMessage("Dry run: No files found.", 5000)
+                    return
 
-    def _show_dry_run_results_dialog(self, results: List[Tuple[pathlib.Path, pathlib.Path, str]], source_directory: pathlib.Path):
-        if not results:
+                # CONSISTENT VARIABLE NAME HERE
+                for src_path, target_path, status_message in engine.process_files_generator(files_to_check_dry_run):
+                    dry_run_results.append((src_path, target_path, status_message))
+
+                self.statusBar().showMessage(f"Dry run complete. {len(dry_run_results)} potential actions.", 5000)
+                self._show_dry_run_results_dialog(dry_run_results, source_directory, effective_output_base)
+           else:
+               # Actual Run - Use the Worker Thread
+
+               self.statusBar().showMessage(f"Starting organization for: {source_directory.name}...", 0)
+               self.organization_config_panel.organize_button.setEnabled(False)
+               self.progress_dialog = QProgressDialog("Organizing files...", "Cancel", 0, 100, self)
+
+
+               self.progress_dialog.setWindowTitle("Processing")
+               self.progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+               self.progress_dialog.setAutoClose(False) # We will close it manually
+               self.progress_dialog.setAutoReset(False) # We will reset it manually
+               self.progress_dialog.setValue(0) # Start at 0%
+
+               self.organization_worker = OrganizationWorker(settings, source_directory, OrganizationEngine) # Pass engine class
+
+               self.organization_worker.progress_updated.connect(self._on_worker_progress)
+               self.organization_worker.finished.connect(self._on_worker_finished)
+               self.organization_worker.error_occurred.connect(self._on_worker_error)
+
+               self.progress_dialog.canceled.connect(self.organization_worker.cancel) # Connect cancel signal
+
+               self.organization_worker.start()
+               self.progress_dialog.show()
+
+    def _on_worker_progress(self, current_item: int, total_items: int, message: str):
+            if self.progress_dialog:
+                if total_items > 0:
+                    percentage = int((current_item / total_items) * 100)
+                    self.progress_dialog.setValue(percentage)
+                else: # Should not happen if worker checks for total_items == 0
+                    self.progress_dialog.setValue(0)
+                self.progress_dialog.setLabelText(message)
+                self.statusBar().showMessage(message, 3000) # Also update status bar
+
+    def _on_worker_finished(self, results: list):
+            if self.progress_dialog:
+                self.progress_dialog.setValue(self.progress_dialog.maximum()) # Mark as 100%
+                self.progress_dialog.close()
+                self.progress_dialog = None
+
+            self.organization_config_panel.organize_button.setEnabled(True) # Re-enable button
+
+            # Check if operation was cancelled (last result might indicate this if worker appends "Cancelled")
+            was_cancelled = any("Cancelled" in r[2] for r in results if len(r) > 2)
+
+            if was_cancelled:
+                QMessageBox.warning(self, "Operation Cancelled", "File organization was cancelled by the user.")
+                self.statusBar().showMessage("Organization cancelled.", 5000)
+            else:
+                QMessageBox.information(self, "Organization Complete", f"{len(results)} file actions processed.")
+                self.statusBar().showMessage("Organization complete.", 5000)
+
+            self.file_browser_panel.refresh_list() # Refresh file browser
+            self.organization_worker = None
+
+
+    def _on_worker_error(self, error_message: str):
+            if self.progress_dialog:
+                self.progress_dialog.close() # Close progress dialog on error
+                self.progress_dialog = None
+
+            self.organization_config_panel.organize_button.setEnabled(True)
+            QMessageBox.critical(self, "Organization Error", error_message)
+            self.statusBar().showMessage(f"Error: {error_message}", 5000)
+            self.organization_worker = None
+
+    def _show_dry_run_results_dialog(self, results: List[Tuple[pathlib.Path, pathlib.Path, str]],
+                                         source_directory: pathlib.Path,
+                                         effective_output_base_dir: pathlib.Path): # Correct: 3 params other than self
+            if not results:
                 QMessageBox.information(self, "Dry Run Results", "No files matched the criteria or no actions proposed.")
                 return
+            # PASS effective_output_base_dir to dialog constructor
+            dialog = DryRunResultsDialog(results, source_directory, effective_output_base_dir, self) # Calling with 4 args + implicit self for dialog
+            dialog.exec()
 
-        # Instantiate and show the new dialog
-        dialog = DryRunResultsDialog(results, source_directory, self) # Pass parent=self
-        dialog.exec() # Use exec() for modal dialogs
-
-
-        # For now, just print. We'll build a dialog in the next step.
-        # print("\n--- DRY RUN RESULTS (Dialog Placeholder) ---")
-        # for source, target, status in results:
-        #     print(f"[{status}] {source.name}  ==>  {target}")
-        # print("-------------------------------------------\n")
 
 
 if __name__ == "__main__":

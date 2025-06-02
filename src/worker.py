@@ -3,9 +3,6 @@ from typing import List, Tuple, Any # Any for engine, if not fully typed yet
 import time
 from PySide6.QtCore import QThread, Signal
 
-# Assuming OrganizationSettings and OrganizationEngine are accessible
-# Adjust imports based on your project structure if they are in different files
-# For now, let's assume they might be passed or imported if engine.py is separate
 # from .widgets import OrganizationSettings # If settings is in widgets
 # from .engine import OrganizationEngine    # If engine is in engine
 

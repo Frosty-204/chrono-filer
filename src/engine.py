@@ -5,13 +5,13 @@ import os
 import re
 import mimetypes
 import shutil # For actual file operations
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Iterator
 
 # Assuming OrganizationSettings is defined in widgets.py
 # Adjust if you move OrganizationSettings to a models.py
 try:
     from .widgets import OrganizationSettings
-except ImportError: # Fallback for direct execution or different structure
+except ImportError:
     from widgets import OrganizationSettings
 
 
@@ -20,35 +20,67 @@ class OrganizationEngine:
         self.settings = settings
         self.source_directory = source_directory.resolve()
 
-    def process_files(self) -> List[Tuple[pathlib.Path, pathlib.Path, str]]:
-        proposed_actions: List[Tuple[pathlib.Path, pathlib.Path, str]] = []
 
-        if not self.source_directory.is_dir():
-            return [(self.source_directory, self.source_directory, f"Error: Source '{self.source_directory.name}' is not a directory")]
+        if self.settings.target_base_directory:
+            self.output_base_directory = self.settings.target_base_directory.resolve()
+            print(f"DEBUG ENGINE: Using specified target base: {self.output_base_directory}") # DBG
+        else:
+            self.output_base_directory = self.source_directory # Default to source
+            print(f"DEBUG ENGINE: Using source as target base: {self.output_base_directory}") # DBG
 
-        for item in self.source_directory.iterdir():
-            if item.is_file():
+    def process_files_generator(self, files_to_check: List[pathlib.Path]) -> Iterator[Tuple[pathlib.Path, pathlib.Path, str]]:
+            """
+            Processes files based on settings and yields results one by one.
+            Args:
+                files_to_check: A list of pathlib.Path objects representing files to consider.
+            Yields:
+                Tuple of (source_path, target_path, status_message)
+            """
+
+
+            if not self.settings.dry_run and self.settings.target_base_directory:
+                # self.output_base_directory is already resolved and set in __init__
+                if not self.output_base_directory.exists(): # Check if it exists
+                    try:
+                        print(f"DEBUG ENGINE: Attempting to create target base: {self.output_base_directory}") # DBG
+                        self.output_base_directory.mkdir(parents=True, exist_ok=True)
+                    except Exception as e:
+                        print(f"DEBUG ENGINE: FAILED to create target base: {e}") # DBG
+                        yield (self.source_directory, self.output_base_directory, f"Error: Cannot create target base directory '{self.output_base_directory}': {e}")
+                        return # <--- THIS IS A LIKELY CULPRIT IF IT'S ENTERED
+                elif not self.output_base_directory.is_dir(): # It exists but is not a directory
+                    print(f"DEBUG ENGINE: Target base exists but is not a directory: {self.output_base_directory}") # DBG
+                    yield (self.source_directory, self.output_base_directory, f"Error: Target base '{self.output_base_directory}' exists but is not a directory.")
+                    return # <--- THIS IS ALSO A LIKELY CULPRIT
+
+            print(f"DEBUG ENGINE: Starting file iteration. Dry run: {self.settings.dry_run}") # DBG
+            processed_at_least_one_file_loop = False # DBG
+
+            for item in files_to_check: # Iterate over the pre-fetched list
+                # No need for item.is_file() check here if files_to_check only contains files
+                processed_at_least_one_file_loop = True # DBG
+                print(f"DEBUG ENGINE: Processing item: {item.name}") # DBG
+
                 if self._matches_filters(item):
                     try:
                         proposed_target_path_relative = self._calculate_target_path_relative(item)
-                        # Output path is relative to source_directory for now
-                        # A dedicated output base directory could be added later.
-                        # For now, all structure is created *within* the source directory.
-                        proposed_target_path_absolute = self.source_directory / proposed_target_path_relative
+                    # Construct absolute path using the determined output_base_directory
+                        proposed_target_path_absolute = (self.output_base_directory / proposed_target_path_relative).resolve()
 
-                        # Resolve to clean up ".." etc. and ensure it's absolute.
-                        # This also helps in creating parent directories robustly.
-                        proposed_target_path_absolute = proposed_target_path_absolute.resolve()
+                        status = "To be moved" # Default status for dry run
+                        original_target_path_for_status = proposed_target_path_absolute
 
-                        status = "To be moved"
-
+                        # Conflict Resolution and Actual Operation Logic
                         if proposed_target_path_absolute.exists():
                             if proposed_target_path_absolute.is_dir():
-                                status = f"Conflict: Target '{proposed_target_path_absolute.name}' is an existing directory. Skipped."
+                                status = f"Conflict: Target '{original_target_path_for_status.relative_to(self.output_base_directory)}' is an existing directory. Skipped."
+
                             elif self.settings.conflict_resolution == "Skip":
-                                status = f"Conflict: Target '{proposed_target_path_absolute.name}' exists. Skipped."
+                                status = f"Conflict: Target '{original_target_path_for_status.relative_to(self.output_base_directory)}' exists. Skipped."
+
                             elif self.settings.conflict_resolution == "Overwrite":
-                                status = f"Conflict: Target '{proposed_target_path_absolute.name}' exists. To be overwritten."
+                                status = f"Conflict: Target '{original_target_path_for_status.relative_to(self.output_base_directory)}' exists. To be overwritten."
+
                             elif self.settings.conflict_resolution == "Rename with Suffix":
                                 count = 1
                                 original_stem = proposed_target_path_absolute.stem
@@ -57,29 +89,37 @@ class OrganizationEngine:
                                 while temp_target_path.exists():
                                     temp_target_path = temp_target_path.with_name(f"{original_stem}_{count}{original_suffix}")
                                     count += 1
-                                proposed_target_path_absolute = temp_target_path # Update the target path
-                                status = f"Conflict: Target exists. To be renamed to '{proposed_target_path_absolute.name}'."
+                                proposed_target_path_absolute = temp_target_path
+                                status = f"Conflict: Target exists. To be renamed to '{original_target_path_for_status.relative_to(self.output_base_directory)}'."
 
-                        # Actual file operation if not dry run and not skipped/error
-                        if not self.settings.dry_run and "Skipped" not in status and "Error" not in status:
-                            try:
-                                # Ensure target directory exists
-                                proposed_target_path_absolute.parent.mkdir(parents=True, exist_ok=True)
+                        # Actual file operation if not dry run
+                        if not self.settings.dry_run:
+                            if "Skipped" not in status and "Error" not in status :
+                                try:
+                                    proposed_target_path_absolute.parent.mkdir(parents=True, exist_ok=True)
+                                    shutil.move(str(item), str(proposed_target_path_absolute))
 
-                                # Perform the move
-                                shutil.move(str(item), str(proposed_target_path_absolute))
-                                status = f"Moved to '{proposed_target_path_absolute.relative_to(self.source_directory)}'" # Show relative path in status
-                            except Exception as e_move:
-                                print(f"Error moving file {item.name} to {proposed_target_path_absolute}: {e_move}")
-                                status = f"Error moving: {e_move}" # Report error in status
+                                    if "To be overwritten" in status: # Derived from original_target_path_for_status
+                                        status = f"Overwritten: {original_target_path_for_status.relative_to(self.output_base_directory)}"
+                                    elif "To be renamed to" in status: # proposed_target_path_absolute was updated
+                                        status = f"Moved and Renamed: {proposed_target_path_absolute.relative_to(self.output_base_directory)}"
+                                    else: # Standard move
+                                        status = f"Moved: {proposed_target_path_absolute.relative_to(self.output_base_directory)}"
+                                except Exception as e_move:
+                                    print(f"Error moving file {item.name} to {proposed_target_path_absolute}: {e_move}")
+                                    status = f"Error moving: {e_move}"
 
-                        proposed_actions.append((item, proposed_target_path_absolute, status))
+                        yield item, proposed_target_path_absolute, status
+
+                        if not processed_at_least_one_file_loop: # DBG
+                            print("DEBUG ENGINE: Loop for 'item in files_to_check' was not entered or was empty.") # DB
 
                     except Exception as e_calc:
                         print(f"Error calculating target for {item.name}: {e_calc}")
-                        proposed_actions.append((item, item, f"Error processing: {e_calc}"))
+                        yield item, item, f"Error processing: {e_calc}"
+                # else: # Optionally yield for files that don't match filters, if useful for progress
+                #    yield item, item, "Skipped: No filter match"
 
-        return proposed_actions
 
     def _matches_filters(self, file_path: pathlib.Path) -> bool:
             # Name Filter

@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QGroupBox, QFormLayout, QComboBox, QDateEdit,
     QSpinBox, QCheckBox, QScrollArea, QDialog,
     QTableWidget, QTableWidgetItem, QAbstractItemView, QHeaderView,
-    QDialogButtonBox, QMessageBox
+    QDialogButtonBox, QMessageBox, QFileDialog
 )
 from PySide6.QtGui import QPalette, QColor, QPixmap
 
@@ -23,14 +23,14 @@ from PySide6.QtCore import Qt, Signal
 @dataclass
 class OrganizationSettings:
     name_filter_text: str = ""
-    name_filter_type: str = "Contains" # "Starts with", "Ends with", "Exact match", "Regex"
-    type_filter_text: str = "" # Comma-separated extensions or mimetypes
+    name_filter_type: str = "Contains"
+    type_filter_text: str = ""
     created_after_date: Optional[datetime.date] = None
     modified_before_date: Optional[datetime.date] = None
     size_min_kb: int = 0
-    size_max_kb: int = (1024 * 1024) # Default: 1GB in KB (from previous spinbox max)
-
+    size_max_kb: int = -1
     structure_template: str = "[YYYY]/[MM]/[Filename].[Ext]"
+    target_base_directory: Optional[pathlib.Path] = None
     conflict_resolution: str = "Skip" # "Overwrite", "Rename with Suffix"
     dry_run: bool = True
 
@@ -277,7 +277,6 @@ class MetadataPanel(QWidget):
             self.name_value.setText("Error reading metadata")
 
 
-# In class PreviewPanel, __init__ method:
 class PreviewPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -399,14 +398,13 @@ class PreviewPanel(QWidget):
             self.stacked_widget.setCurrentWidget(self.unsupported_label)
 
 class OrganizationConfigPanel(QWidget):
-    # Define a signal that will carry the OrganizationSettings object
     organize_triggered = Signal(OrganizationSettings) # type: ignore
 
     PRESET_TEMPLATES = {
         "Custom": "", # Special value, means use QLineEdit directly
         "Year/Month/Filename": "[YYYY]/[MM]/[Filename].[Ext]",
         "Year-Month-Day/Filename": "[YYYY]-[MM]-[DD]/[Filename].[Ext]",
-        "File Type/Year/Filename": "[DetectedFileType]/[YYYY]/[Filename].[Ext]", # We'll need to handle [DetectedFileType]
+        "File Type/Year/Filename": "[DetectedFileType]/[YYYY]/[Filename].[Ext]",
         "Capture Group 1/Filename (Regex)": "[RegexGroup1]/[Filename].[Ext]",
     }
     def __init__(self, parent=None):
@@ -433,7 +431,7 @@ class OrganizationConfigPanel(QWidget):
         # Name Filter
         self.name_filter_text = QLineEdit()
         self.name_filter_type = QComboBox()
-        self.name_filter_type.addItems(["Contains", "Starts with", "Ends with", "Exact match", "Regex"]) # Added Regex early
+        self.name_filter_type.addItems(["Contains", "Starts with", "Ends with", "Exact match", "Regex"])
         name_filter_layout = QHBoxLayout()
         name_filter_layout.addWidget(self.name_filter_text)
         name_filter_layout.addWidget(self.name_filter_type)
@@ -448,7 +446,7 @@ class OrganizationConfigPanel(QWidget):
         self.created_after_date = QDateEdit()
         self.created_after_date.setCalendarPopup(True)
         self.created_after_date.setDisplayFormat("yyyy-MM-dd")
-        self.created_after_date.setDate(datetime.date(1970, 1, 1)) # Default early date
+        self.created_after_date.setDate(datetime.date(2010, 1, 1))
         filters_layout.addRow("Created After:", self.created_after_date)
 
         self.modified_before_date = QDateEdit()
@@ -476,13 +474,23 @@ class OrganizationConfigPanel(QWidget):
 
 
         # --- Output Structure Group ---
-        output_group = QGroupBox("Output Directory Structure")
-        output_layout = QVBoxLayout(output_group) # Change to QVBoxLayout for more flexibility
+        output_group = QGroupBox("Output Configuration")
+        output_layout_form = QFormLayout(output_group)
+
+         # Target Base Directory
+        target_dir_layout = QHBoxLayout()
+        self.target_dir_edit = QLineEdit()
+        self.target_dir_edit.setPlaceholderText("Optional: Leave blank to organize within source directory")
+        target_dir_layout.addWidget(self.target_dir_edit)
+        self.browse_target_dir_button = QPushButton("Browse...")
+        target_dir_layout.addWidget(self.browse_target_dir_button)
+        output_layout_form.addRow("Target Directory:", target_dir_layout)
 
         # Preset ComboBox
         self.structure_preset_combo = QComboBox()
         self.structure_preset_combo.addItems(list(self.PRESET_TEMPLATES.keys()))
-        output_layout.addWidget(self.structure_preset_combo)
+        output_layout_form.addRow("Structure Preset:", self.structure_preset_combo)
+
 
         # Template Edit Line and Info Button
         template_edit_layout = QHBoxLayout()
@@ -500,7 +508,7 @@ class OrganizationConfigPanel(QWidget):
         self.template_info_button.setToolTip("Show available template placeholders")
         template_edit_layout.addWidget(self.template_info_button)
 
-        output_layout.addLayout(template_edit_layout)
+        output_layout_form.addRow("Custom Structure:", template_edit_layout)
         container_layout.addWidget(output_group)
 
         # --- Actions Group ---
@@ -532,10 +540,20 @@ class OrganizationConfigPanel(QWidget):
         # added dropdown
         self.structure_preset_combo.currentTextChanged.connect(self._on_structure_preset_changed)
         self.template_info_button.clicked.connect(self._show_template_info)
+        self.browse_target_dir_button.clicked.connect(self._browse_target_directory)
 
         # Initial state for template edit based on "Custom" or other preset
         self._on_structure_preset_changed(self.structure_preset_combo.currentText())
 
+
+    def _browse_target_directory(self):
+        directory = QFileDialog.getExistingDirectory(
+            self,
+            "Select Target Base Directory",
+            self.target_dir_edit.text() or str(pathlib.Path.home()) # Start from current or home
+        )
+        if directory: # If a directory was selected (not cancelled)
+            self.target_dir_edit.setText(directory)
 
     def _on_structure_preset_changed(self, preset_name: str):
         template = self.PRESET_TEMPLATES.get(preset_name, "")
@@ -605,6 +623,9 @@ class OrganizationConfigPanel(QWidget):
 
                 conflict = self.conflict_resolution_combo.currentText()
                 dry_run = self.dry_run_checkbox.isChecked()
+                target_base_dir_str = self.target_dir_edit.text().strip()
+                target_base_dir_path = pathlib.Path(target_base_dir_str) if target_base_dir_str else None
+                print(f"DEBUG UI: Target dir string from UI: '{target_base_dir_str}', Path object: {target_base_dir_path}") # DBG
 
                 return OrganizationSettings(
                     name_filter_text=name_text,
@@ -615,12 +636,16 @@ class OrganizationConfigPanel(QWidget):
                     size_min_kb=size_min, # Pass as is
                     size_max_kb=actual_size_max, # Pass interpreted max
                     structure_template=structure,
+                    target_base_directory=target_base_dir_path,
                     conflict_resolution=conflict,
                     dry_run=dry_run
                 )
 
 class DryRunResultsDialog(QDialog):
-    def __init__(self, results: List[Tuple[pathlib.Path, pathlib.Path, str]], source_directory: pathlib.Path, parent=None):
+    def __init__(self, results: List[Tuple[pathlib.Path, pathlib.Path, str]],
+                     source_directory: pathlib.Path,
+                     effective_output_base_dir: pathlib.Path,
+                     parent=None):
         super().__init__(parent)
         self.setWindowTitle("Dry Run - Proposed Changes")
         self.setMinimumSize(800, 400) # Give it a reasonable default size
