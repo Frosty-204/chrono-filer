@@ -625,7 +625,7 @@ class OrganizationConfigPanel(QWidget):
                 dry_run = self.dry_run_checkbox.isChecked()
                 target_base_dir_str = self.target_dir_edit.text().strip()
                 target_base_dir_path = pathlib.Path(target_base_dir_str) if target_base_dir_str else None
-                print(f"DEBUG UI: Target dir string from UI: '{target_base_dir_str}', Path object: {target_base_dir_path}") # DBG
+                # print(f"DEBUG UI: Target dir string from UI: '{target_base_dir_str}', Path object: {target_base_dir_path}") # DBG
 
                 return OrganizationSettings(
                     name_filter_text=name_text,

@@ -128,7 +128,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(main_splitter)
 
     def on_start_organization(self, settings: OrganizationSettings):
-           print(f"DEBUG MAINWINDOW: Received settings with target_base_directory: {settings.target_base_directory}") # DBG
+           # print(f"DEBUG MAINWINDOW: Received settings with target_base_directory: {settings.target_base_directory}") # DBG
            current_browse_path_str = self.file_browser_panel.current_path
            source_directory = pathlib.Path(current_browse_path_str)
 

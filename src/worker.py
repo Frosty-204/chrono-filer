@@ -6,7 +6,7 @@ from PySide6.QtCore import QThread, Signal
 # from .widgets import OrganizationSettings # If settings is in widgets
 # from .engine import OrganizationEngine    # If engine is in engine
 
-DEBUG_OPERATION_DELAY = 0  # SHOULD NOT BE USED IN PRODUCTION
+# DEBUG_OPERATION_DELAY = 0  # SHOULD NOT BE USED IN PRODUCTION
 
 class OrganizationWorker(QThread):
     progress_updated = Signal(int, int, str)
@@ -44,10 +44,6 @@ class OrganizationWorker(QThread):
             while True:
                 if self._is_cancelled:
                     self.progress_updated.emit(processed_count, total_items, "Operation Cancelling...")
-                    # Add a "Cancelled" status for any remaining items conceptually
-                    # or just mark the point of cancellation.
-                    # The current `results` list will contain successfully processed items.
-                    # We might want to indicate that subsequent items were not processed.
                     break # Exit the processing loop
 
                 try:
@@ -69,8 +65,8 @@ class OrganizationWorker(QThread):
 
 
                 # --- ARTIFICIAL DELAY FOR DEBUGGING ---
-                if DEBUG_OPERATION_DELAY > 0 and not self.settings.dry_run: # Delay only for actual runs
-                    time.sleep(DEBUG_OPERATION_DELAY)
+                # if DEBUG_OPERATION_DELAY > 0 and not self.settings.dry_run: # Delay only for actual runs
+                #     time.sleep(DEBUG_OPERATION_DELAY)
                 # --- END ARTIFICIAL DELAY ---
 
             self.finished.emit(results) # Emit whatever results were gathered
@@ -82,5 +78,5 @@ class OrganizationWorker(QThread):
 
 
     def cancel(self):
-        print("DEBUG: Worker cancel method called")
+        # print("DEBUG: Worker cancel method called")
         self._is_cancelled = True
