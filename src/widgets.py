@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import Optional, List, Tuple
 
 from PySide6.QtWidgets import (
-    QWidget, QLabel, QVBoxLayout, QHBoxLayout,
+    QBoxLayout, QWidget, QLabel, QVBoxLayout, QHBoxLayout,
     QLineEdit, QPushButton, QListWidget, QListWidgetItem,
     QStyle, QGridLayout, QTextEdit, QScrollArea,
     QSizePolicy, QSpacerItem, QStackedWidget,
@@ -15,10 +15,11 @@ from PySide6.QtWidgets import (
     QSpinBox, QCheckBox, QScrollArea, QDialog,
     QTableWidget, QTableWidgetItem, QAbstractItemView, QHeaderView,
     QDialogButtonBox, QMessageBox, QFileDialog
+
 )
 from PySide6.QtGui import QPalette, QColor, QPixmap
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QDate
 
 @dataclass
 class OrganizationSettings:
@@ -30,9 +31,10 @@ class OrganizationSettings:
     size_min_kb: int = 0
     size_max_kb: int = -1
     structure_template: str = "[YYYY]/[MM]/[Filename].[Ext]"
-    target_base_directory: Optional[pathlib.Path] = None
     conflict_resolution: str = "Skip" # "Overwrite", "Rename with Suffix"
     dry_run: bool = True
+    target_base_directory: Optional[pathlib.Path] = None
+    process_recursively:bool = False
 
 class PlaceholderWidget(QWidget):
     def __init__(self, name, color_name="lightgray", parent=None):
@@ -407,8 +409,9 @@ class OrganizationConfigPanel(QWidget):
         "File Type/Year/Filename": "[DetectedFileType]/[YYYY]/[Filename].[Ext]",
         "Capture Group 1/Filename (Regex)": "[RegexGroup1]/[Filename].[Ext]",
     }
-    def __init__(self, parent=None):
+    def __init__(self, file_browser_panel_ref=None, parent=None):
         super().__init__(parent)
+        self.file_browser_panel_ref = file_browser_panel_ref
         self.main_layout = QVBoxLayout(self)
         self.setLayout(self.main_layout)
 
@@ -427,6 +430,13 @@ class OrganizationConfigPanel(QWidget):
         # --- Filters Group ---
         filters_group = QGroupBox("Filtering Criteria")
         filters_layout = QFormLayout(filters_group)
+
+        self.process_recursively_checkbox = QCheckBox("Recursively process subdirectories")
+        self.process_recursively_checkbox.setToolTip(
+            "If checked, Chrono Filer will scan all subdirectories of the source folder.\n"
+            "If unchecked (default), it only processes files in the root of the source folder."
+        )
+        filters_layout.addRow(self.process_recursively_checkbox)
 
         # Name Filter
         self.name_filter_text = QLineEdit()
@@ -475,40 +485,39 @@ class OrganizationConfigPanel(QWidget):
 
         # --- Output Structure Group ---
         output_group = QGroupBox("Output Configuration")
-        output_layout_form = QFormLayout(output_group)
+        output_layout = QVBoxLayout(output_group)
 
-         # Target Base Directory
-        target_dir_layout = QHBoxLayout()
-        self.target_dir_edit = QLineEdit()
-        self.target_dir_edit.setPlaceholderText("Optional: Leave blank to organize within source directory")
-        target_dir_layout.addWidget(self.target_dir_edit)
-        self.browse_target_dir_button = QPushButton("Browse...")
-        target_dir_layout.addWidget(self.browse_target_dir_button)
-        output_layout_form.addRow("Target Directory:", target_dir_layout)
-
-        # Preset ComboBox
+        target_base_layout = QHBoxLayout()
+        target_base_label = QLabel("Target Base Directory (Optional):")
+        self.target_base_dir_edit = QLineEdit()
+        self.target_base_dir_edit.setPlaceholderText("Leave empty to organize within source directory")
+        self.browse_target_button = QPushButton("Browse...")
+        target_base_layout.addWidget(target_base_label)
+        target_base_layout.addWidget(self.target_base_dir_edit)
+        target_base_layout.addWidget(self.browse_target_button)
+        output_layout.addLayout(target_base_layout)
+        preset_label = QLabel("Structure Template Preset:")
+        output_layout.addWidget(preset_label) # Add a label for the preset combo
         self.structure_preset_combo = QComboBox()
         self.structure_preset_combo.addItems(list(self.PRESET_TEMPLATES.keys()))
-        output_layout_form.addRow("Structure Preset:", self.structure_preset_combo)
+        output_layout.addWidget(self.structure_preset_combo)
 
 
-        # Template Edit Line and Info Button
+        template_edit_label = QLabel("Structure Template:") # Add a label
+        output_layout.addWidget(template_edit_label)
         template_edit_layout = QHBoxLayout()
         self.structure_template_edit = QLineEdit()
         self.structure_template_edit.setPlaceholderText("Define custom structure or see preset")
-        # Set default text based on a default preset
-        default_preset_key = "Year/Month/Filename"
-        self.structure_template_edit.setText(self.PRESET_TEMPLATES.get(default_preset_key, "[YYYY]/[MM]/[Filename].[Ext]"))
-        self.structure_preset_combo.setCurrentText(default_preset_key) # Sync combobox
-
+        default_preset_key = "Year-Month/Filename"
+        self.structure_template_edit.setText(self.PRESET_TEMPLATES.get(default_preset_key, "[YYYY]-[MM]/[Filename].[Ext]"))
+        self.structure_preset_combo.setCurrentText(default_preset_key)
         template_edit_layout.addWidget(self.structure_template_edit)
-
         self.template_info_button = QPushButton()
         self.template_info_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxInformation))
         self.template_info_button.setToolTip("Show available template placeholders")
         template_edit_layout.addWidget(self.template_info_button)
+        output_layout.addLayout(template_edit_layout)
 
-        output_layout_form.addRow("Custom Structure:", template_edit_layout)
         container_layout.addWidget(output_group)
 
         # --- Actions Group ---
@@ -540,20 +549,29 @@ class OrganizationConfigPanel(QWidget):
         # added dropdown
         self.structure_preset_combo.currentTextChanged.connect(self._on_structure_preset_changed)
         self.template_info_button.clicked.connect(self._show_template_info)
-        self.browse_target_dir_button.clicked.connect(self._browse_target_directory)
+        self.browse_target_button.clicked.connect(self._on_browse_target_directory)
 
         # Initial state for template edit based on "Custom" or other preset
         self._on_structure_preset_changed(self.structure_preset_combo.currentText())
 
 
-    def _browse_target_directory(self):
+    def _on_browse_target_directory(self):
         directory = QFileDialog.getExistingDirectory(
             self,
             "Select Target Base Directory",
-            self.target_dir_edit.text() or str(pathlib.Path.home()) # Start from current or home
+            self.target_base_dir_edit.text() or self.file_browser_panel.current_path,
         )
-        if directory: # If a directory was selected (not cancelled)
-            self.target_dir_edit.setText(directory)
+        if directory:
+            self.target_base_dir_edit.setText(directory)
+
+
+    @property
+    def file_browser_panel(self): # Placeholder to remind us this needs a proper source
+        # In a real scenario, this should be passed in or accessed safely
+        if self.parent() and hasattr(self.parent().parent().parent(), 'file_browser_panel'): # Example of trying to reach MainWindow's attribute
+             return self.parent().parent().parent().file_browser_panel
+        return type('obj', (object,), {'current_path': str(pathlib.Path.home())})() # Dummy fallback
+
 
     def _on_structure_preset_changed(self, preset_name: str):
         template = self.PRESET_TEMPLATES.get(preset_name, "")
@@ -593,10 +611,8 @@ class OrganizationConfigPanel(QWidget):
                 name_type = self.name_filter_type.currentText()
                 type_text = self.type_filter_text.text().strip()
 
-                # QDateEdit.date() returns QDate. Convert to datetime.date
-                # Only use the date if it's different from the "ignore" default
                 created_val = self.created_after_date.date().toPython()
-                created_after = created_val if created_val != datetime.date(1970, 1, 1) else None
+                created_after = created_val if created_val != datetime.date(2010, 1, 1) else None
 
                 modified_val = self.modified_before_date.date().toPython()
                 modified_before = modified_val if modified_val != datetime.date.today() else None
@@ -604,54 +620,98 @@ class OrganizationConfigPanel(QWidget):
                 size_min = self.size_min_spinbox.value()
                 size_max = self.size_max_spinbox.value()
 
-                # If max is at its ceiling and min is at its floor, effectively no size filter from user.
-                # However, it's better to let the engine handle 0 as "no min" and a very large number or a flag as "no max".
-                # Let's pass them as is, and the engine can interpret.
-                # If size_max is set to the spinbox's maximum, it could mean "no upper limit".
-                if size_max == self.size_max_spinbox.maximum():
-                    actual_size_max = -1 # Use -1 to signify no upper bound for the engine
-                else:
-                    actual_size_max = size_max
+                actual_size_max = -1 if size_max == self.size_max_spinbox.maximum() else size_max
 
+                process_recursively = self.process_recursively_checkbox.isChecked()
 
                 structure = self.structure_template_edit.text().strip()
                 if not structure and self.structure_preset_combo.currentText() != "Custom":
-                            # If QLineEdit is empty but a non-custom preset is selected, re-fetch from preset
-                            structure = self.PRESET_TEMPLATES.get(self.structure_preset_combo.currentText(), "[YYYY]/[MM]/[Filename].[Ext]")
+                            structure = self.PRESET_TEMPLATES.get(self.structure_preset_combo.currentText(), "[YYYY]-[MM]/[Filename].[Ext]")
                 elif not structure and self.structure_preset_combo.currentText() == "Custom":
-                            structure = "[YYYY]/[MM]/[Filename].[Ext]" # Fallback if custom is empty
+                            structure = "[YYYY]-[MM]/[Filename].[Ext]" # Fallback if custom is empty
 
                 conflict = self.conflict_resolution_combo.currentText()
                 dry_run = self.dry_run_checkbox.isChecked()
-                target_base_dir_str = self.target_dir_edit.text().strip()
-                target_base_dir_path = pathlib.Path(target_base_dir_str) if target_base_dir_str else None
-                # print(f"DEBUG UI: Target dir string from UI: '{target_base_dir_str}', Path object: {target_base_dir_path}") # DBG
+
+                target_base_dir_str = self.target_base_dir_edit.text().strip()
+                target_base = None
+                if target_base_dir_str:
+                    target_base = str(pathlib.Path(target_base_dir_str).expanduser().resolve())
 
                 return OrganizationSettings(
                     name_filter_text=name_text,
-                    name_filter_type=name_type,
-                    type_filter_text=type_text,
+                    name_filter_type=self.name_filter_type.currentText(),
+                    type_filter_text=self.type_filter_text.text().strip(),
                     created_after_date=created_after,
                     modified_before_date=modified_before,
                     size_min_kb=size_min, # Pass as is
                     size_max_kb=actual_size_max, # Pass interpreted max
                     structure_template=structure,
-                    target_base_directory=target_base_dir_path,
+                    target_base_directory=target_base,
                     conflict_resolution=conflict,
-                    dry_run=dry_run
+                    dry_run=dry_run,
+                    process_recursively=process_recursively
                 )
+    def get_ui_state(self) -> dict[str, any]:
+            """Returns a dictionary representing the current state of the UI widgets."""
+            state = {
+                "name_filter_text": self.name_filter_text.text(),
+                "name_filter_type_index": self.name_filter_type.currentIndex(),
+                "type_filter_text": self.type_filter_text.text(),
+                "created_after_date": self.created_after_date.date().toString(Qt.DateFormat.ISODate),
+                "modified_before_date": self.modified_before_date.date().toString(Qt.DateFormat.ISODate),
+                "size_min_kb": self.size_min_spinbox.value(),
+                "size_max_kb": self.size_max_spinbox.value(),
+                "structure_preset_name": self.structure_preset_combo.currentText(),
+                "structure_template_text": self.structure_template_edit.text(),
+                "conflict_resolution_index": self.conflict_resolution_combo.currentIndex(),
+                "dry_run_checked": self.dry_run_checkbox.isChecked(),
+                "target_base_directory": self.target_base_dir_edit.text(),
+                "process_recursively_checked": self.process_recursively_checkbox.isChecked()
+            }
+            return state
+
+    def set_ui_state(self, state: dict[str, any]):
+        """Sets the state of the UI widgets from a dictionary."""
+        self.name_filter_text.setText(state.get("name_filter_text", ""))
+        self.name_filter_type.setCurrentIndex(state.get("name_filter_type_index", 0))
+        self.type_filter_text.setText(state.get("type_filter_text", ""))
+
+        # Dates need to be parsed from ISO string
+        created_date_str = state.get("created_after_date")
+        if created_date_str:
+            self.created_after_date.setDate(QDate.fromString(created_date_str, Qt.DateFormat.ISODate))
+
+        modified_date_str = state.get("modified_before_date")
+        if modified_date_str:
+            self.modified_before_date.setDate(QDate.fromString(modified_date_str, Qt.DateFormat.ISODate))
+
+        self.size_min_spinbox.setValue(state.get("size_min_kb", 0))
+        self.size_max_spinbox.setValue(state.get("size_max_kb", 1024*1024))
+
+        # Handle structure template carefully
+        preset_name = state.get("structure_preset_name", "Custom")
+        self.structure_preset_combo.setCurrentText(preset_name)
+        if preset_name == "Custom":
+            self.structure_template_edit.setText(state.get("structure_template_text", ""))
+
+        self.conflict_resolution_combo.setCurrentIndex(state.get("conflict_resolution_index", 0))
+        self.dry_run_checkbox.setChecked(state.get("dry_run_checked", True))
+        self.target_base_dir_edit.setText(state.get("target_base_directory", ""))
+        self.process_recursively_checkbox.setChecked(state.get("process_recursively_checked", False))
 
 class DryRunResultsDialog(QDialog):
     def __init__(self, results: List[Tuple[pathlib.Path, pathlib.Path, str]],
-                     source_directory: pathlib.Path,
-                     effective_output_base_dir: pathlib.Path,
-                     parent=None):
+                    source_directory: pathlib.Path,
+                    effective_output_base_dir: pathlib.Path,
+                    parent=None):
         super().__init__(parent)
         self.setWindowTitle("Dry Run - Proposed Changes")
         self.setMinimumSize(800, 400) # Give it a reasonable default size
         self.setModal(True) # Make it modal
 
-        self.source_dir = source_directory.resolve() # Store for making paths relative
+        self.source_dir = source_directory.resolve()
+        self.output_base_dir = effective_output_base_dir.resolve()
 
         layout = QVBoxLayout(self)
 
@@ -674,8 +734,8 @@ class DryRunResultsDialog(QDialog):
                                  if source_path.is_relative_to(self.source_dir) \
                                  else str(source_path)
 
-                target_display = str(target_path.relative_to(self.source_dir)) \
-                                 if target_path.is_relative_to(self.source_dir) \
+                target_display = str(target_path.relative_to(self.output_base_dir)) \
+                                 if target_path.is_relative_to(self.output_base_dir) \
                                  else str(target_path)
 
             except ValueError: # Fallback if relative_to fails (e.g. different drives on Windows)

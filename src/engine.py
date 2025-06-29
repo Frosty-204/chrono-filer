@@ -22,119 +22,95 @@ class OrganizationEngine:
 
 
         if self.settings.target_base_directory:
-            self.output_base_directory = self.settings.target_base_directory.resolve()
-            # print(f"DEBUG ENGINE: Using specified target base: {self.output_base_directory}") # DBG
+            self.output_base_directory = pathlib.Path(self.settings.target_base_directory).resolve()
         else:
-            self.output_base_directory = self.source_directory # Default to source
-            # print(f"DEBUG ENGINE: Using source as target base: {self.output_base_directory}") # DBG
+            self.output_base_directory = self.source_directory
+
 
     def process_files_generator(self, files_to_check: List[pathlib.Path]) -> Iterator[Tuple[pathlib.Path, pathlib.Path, str]]:
-            """
-            Processes files based on settings and yields results one by one.
-            Args:
-                files_to_check: A list of pathlib.Path objects representing files to consider.
-            Yields:
-                Tuple of (source_path, target_path, status_message)
-            """
-
             if not self.source_directory.is_dir():
                 yield (self.source_directory, self.source_directory, f"Error: Source '{self.source_directory.name}' is not a directory")
                 return
 
-            if not self.settings.dry_run and self.settings.target_base_directory:
-                if not self.output_base_directory.exists():
-                    try:
-                        # print(f"DEBUG ENGINE: Attempting to create target base: {self.output_base_directory}") # DBG
-                        self.output_base_directory.mkdir(parents=True, exist_ok=True)
-                    except Exception as e:
-                        # print(f"DEBUG ENGINE: FAILED to create target base: {e}") # DBG
-                        yield (self.source_directory, self.output_base_directory, f"Error: Cannot create target base directory '{self.output_base_directory}': {e}")
-                        return
-                elif not self.output_base_directory.is_dir():
-                    # print(f"DEBUG ENGINE: Target base exists but is not a directory: {self.output_base_directory}") # DBG
-                    yield (self.source_directory, self.output_base_directory, f"Error: Target base '{self.output_base_directory}' exists but is not a directory.")
-                    return
-
-            # print(f"DEBUG ENGINE: Starting file iteration. Dry run: {self.settings.dry_run}") # DBG
-            processed_at_least_one_file_loop = False # DBG
-
             for item in files_to_check:
-                processed_at_least_one_file_loop = True # DBG
-                # print(f"DEBUG ENGINE: Processing item: {item.name}") # DBG
-
                 if self._matches_filters(item):
                     try:
-                        proposed_target_path_relative = self._calculate_target_path_relative(item)
-                        proposed_target_path_absolute = (self.output_base_directory / proposed_target_path_relative).resolve()
+                        relative_target_path_str = self._calculate_target_path_relative(item)
+                        current_proposed_target_abs = (self.output_base_directory / relative_target_path_str).resolve()
 
-                        status = "To be moved"
-                        original_target_path_for_status = proposed_target_path_absolute
+                        initial_proposed_target_for_status = current_proposed_target_abs
 
-                        resolved_item_path = item.resolve()
-                        if resolved_item_path == proposed_target_path_absolute:
-                            status = f"Already in place: {proposed_target_path_absolute.relative_to(self.output_base_directory)}"
-                            yield item, proposed_target_path_absolute, status
-                            continue 
+                        status_message = "To be moved"
 
+                        if item.resolve() == current_proposed_target_abs.resolve():
+                            status_message = f"Already in place: {current_proposed_target_abs.relative_to(self.output_base_directory)}"
+                            yield item, current_proposed_target_abs, status_message
+                            continue
 
-                        # Conflict Resolution and Actual Operation Logic
-                        if proposed_target_path_absolute.exists():
-                            if proposed_target_path_absolute.is_dir():
-                                status = f"Conflict: Target '{original_target_path_for_status.relative_to(self.output_base_directory)}' is an existing directory. Skipped."
-
+                        if current_proposed_target_abs.exists():
+                            if current_proposed_target_abs.is_dir():
+                                status_message = f"Conflict: Target '{initial_proposed_target_for_status.relative_to(self.output_base_directory)}' is an existing directory. Skipped."
                             elif self.settings.conflict_resolution == "Skip":
-                                status = f"Conflict: Target '{original_target_path_for_status.relative_to(self.output_base_directory)}' exists. Skipped."
-
+                                status_message = f"Conflict: Target '{initial_proposed_target_for_status.relative_to(self.output_base_directory)}' exists. Skipped."
                             elif self.settings.conflict_resolution == "Overwrite":
-                                status = f"Conflict: Target '{original_target_path_for_status.relative_to(self.output_base_directory)}' exists. To be overwritten."
-
+                                status_message = f"Conflict: Target '{initial_proposed_target_for_status.relative_to(self.output_base_directory)}' exists. To be overwritten."
                             elif self.settings.conflict_resolution == "Rename with Suffix":
                                 count = 1
-                                original_stem = original_target_path_for_status.stem
-                                original_suffix = original_target_path_for_status.suffix
-                                temp_target_path = original_target_path_for_status
-                                while temp_target_path.exists():
-                                    temp_target_path = temp_target_path.with_name(f"{original_stem}_{count}{original_suffix}")
+                                original_stem = initial_proposed_target_for_status.stem
+                                original_suffix = initial_proposed_target_for_status.suffix
+
+                                current_proposed_target_abs = initial_proposed_target_for_status.with_name(f"{original_stem}_{count}{original_suffix}")
+                                while current_proposed_target_abs.exists():
                                     count += 1
-                                proposed_target_path_absolute = temp_target_path
-                                status = f"Conflict: Target exists. To be renamed to '{original_target_path_for_status.relative_to(self.output_base_directory)}'."
+                                    current_proposed_target_abs = initial_proposed_target_for_status.with_name(f"{original_stem}_{count}{original_suffix}")
 
-                        # Actual file operation if not dry run
+                                status_message = f"Conflict: Target '{initial_proposed_target_for_status.relative_to(self.output_base_directory)}' exists. To be renamed to '{current_proposed_target_abs.name}'."
+
                         if not self.settings.dry_run:
-                            if "Skipped" not in status and "Error" not in status and "Already in place" not in status :
+                            if "Skipped" not in status_message and "Error" not in status_message and "Already in place" not in status_message:
                                 try:
-                                    proposed_target_path_absolute.parent.mkdir(parents=True, exist_ok=True)
-                                    shutil.move(str(item), str(proposed_target_path_absolute))
+                                    current_proposed_target_abs.parent.mkdir(parents=True, exist_ok=True)
 
-                                    if "To be overwritten" in status: # Derived from original_target_path_for_status
-                                        status = f"Overwritten: {original_target_path_for_status.relative_to(self.output_base_directory)}"
-                                    elif "To be renamed to" in status: # proposed_target_path_absolute was updated
-                                        status = f"Moved and Renamed: {proposed_target_path_absolute.relative_to(self.output_base_directory)}"
-                                    else: # Standard move
-                                        status = f"Moved: {proposed_target_path_absolute.relative_to(self.output_base_directory)}"
+                                       # DEBUG
 
-                                except shutil.Error as e_shutil: # Catch specific shutil errors like "same file"
-                                    if "are the same file" in str(e_shutil).lower(): # Should be caught by our explicit check now
-                                        status = f"Already in place (shutil err): {proposed_target_path_absolute.relative_to(self.output_base_directory)}"
+                                    if "error.zip" in item.name and not self.settings.dry_run:
+                                        status_message = "Error moving: Forced test error"
+                                        yield item, current_proposed_target_abs, status_message
+                                        continue # Skip actual move for this test
+
+                                    shutil.move(str(item), str(current_proposed_target_abs))
+
+                                    if "To be overwritten" in status_message:
+                                        status_message = f"Overwritten: {initial_proposed_target_for_status.relative_to(self.output_base_directory)}"
+                                    elif "To be renamed to" in status_message: # The status already mentions the new name from current_proposed_target_abs.name
+                                        status_message = f"Moved and Renamed to: {current_proposed_target_abs.relative_to(self.output_base_directory)}"
                                     else:
-                                        status = f"Shutil Error moving: {e_shutil}"
-                                    
+                                        status_message = f"Moved to: {current_proposed_target_abs.relative_to(self.output_base_directory)}"
 
+                                except shutil.Error as e_shutil:
+                                    if "are the same file" in str(e_shutil).lower():
+                                        status_message = f"Already in place (shutil err): {current_proposed_target_abs.relative_to(self.output_base_directory)}"
+                                    else:
+                                        status_message = f"Shutil Error moving: {e_shutil}"
                                 except Exception as e_move:
-                                    print(f"Error moving file {item.name} to {proposed_target_path_absolute}: {e_move}")
-                                    status = f"Error moving: {e_move}"
+                                    print(f"Error moving file {item.name} to {current_proposed_target_abs}: {e_move}")
+                                    status_message = f"Error moving: {e_move}"
 
-                        yield item, proposed_target_path_absolute, status
-
-                        # if not processed_at_least_one_file_loop: # DBG
-                            # print("DEBUG ENGINE: Loop for 'item in files_to_check' was not entered or was empty.") # DB
+                        yield item, current_proposed_target_abs, status_message
 
                     except Exception as e_calc:
-                        print(f"Error calculating target for {item.name}: {e_calc}")
-                        yield item, item, f"Error processing: {e_calc}"
+                        print(f"Error calculating/processing for {item.name}: {e_calc}")
+                        current_proposed_target_abs_for_error = item
+                        try:
+
+                            current_proposed_target_abs_for_error = initial_proposed_target_for_status
+                        except NameError:
+                            pass
+                        yield item, current_proposed_target_abs_for_error, f"Error processing: {e_calc}"
+                # else: # File does not match filters (optional: yield a "Skipped: No filter match" status)
+                #    yield item, item, "Skipped: No filter match"
 
     def _matches_filters(self, file_path: pathlib.Path) -> bool:
-            # Name Filter
             if self.settings.name_filter_text:
                 name_text = self.settings.name_filter_text
                 file_name_for_compare = file_path.name

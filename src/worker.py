@@ -21,13 +21,29 @@ class OrganizationWorker(QThread):
         self._is_cancelled = False
 
     def run(self):
-        results = [] # Initialize results list
+        results = []
         try:
             engine = self.engine_class(self.settings, self.source_directory)
 
-            files_to_process_potentially = [
-                item for item in self.source_directory.iterdir() if item.is_file()
-            ]
+            # files_to_process_potentially = [
+            #     item for item in self.source_directory.iterdir() if item.is_file()
+            # ]
+            # total_items = len(files_to_process_potentially)
+
+            print(f"Starting file scan (Recursive: {self.settings.process_recursively})...")
+            if self.settings.process_recursively:
+                # Use rglob() for a deep, recursive scan of all files
+                files_to_process_potentially = [
+                    item for item in self.source_directory.rglob('*') if item.is_file()
+                ]
+            else:
+                # Use iterdir() for a shallow, non-recursive scan (the original behavior)
+                files_to_process_potentially = [
+                    item for item in self.source_directory.iterdir() if item.is_file()
+                ]
+            print(f"Scan complete. Found {len(files_to_process_potentially)} files to check.")
+
+
             total_items = len(files_to_process_potentially)
 
             if total_items == 0:
