@@ -3,18 +3,18 @@ import os
 import pathlib
 import datetime
 import mimetypes
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional, List, Tuple
 
 from PySide6.QtWidgets import (
-    QBoxLayout, QWidget, QLabel, QVBoxLayout, QHBoxLayout,
+    QWidget, QLabel, QVBoxLayout, QHBoxLayout,
     QLineEdit, QPushButton, QListWidget, QListWidgetItem,
-    QStyle, QGridLayout, QTextEdit, QScrollArea,
+    QStyle, QGridLayout, QTextEdit,
     QSizePolicy, QSpacerItem, QStackedWidget,
     QGroupBox, QFormLayout, QComboBox, QDateEdit,
     QSpinBox, QCheckBox, QScrollArea, QDialog,
-    QTableWidget, QTableWidgetItem, QAbstractItemView, QHeaderView,
-    QDialogButtonBox, QMessageBox, QFileDialog
+    QTableWidget, QTableWidgetItem, QAbstractItemView, QMessageBox,
+    QFileDialog
 
 )
 from PySide6.QtGui import QPalette, QColor, QPixmap

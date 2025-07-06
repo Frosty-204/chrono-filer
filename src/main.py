@@ -1,4 +1,3 @@
-from bdb import effective
 # src/main.py
 import sys
 import pathlib
@@ -11,8 +10,9 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressDialog
 )
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt
 from typing import List, Tuple
+from PySide6.QtGui import QAction
 
 from widgets import (
 FileBrowserPanel,
@@ -26,19 +26,16 @@ DryRunResultsDialog
 from engine import OrganizationEngine
 from worker import OrganizationWorker
 from settings_manager import SettingsManager
+from commands import UndoManager, BatchMoveCommand
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
+        self.undo_manager = UndoManager()
         self.settings_manager = SettingsManager()
         self.setWindowTitle("Chrono Filer - v0.1.0")
         self.setGeometry(100, 100, 1280, 800)
-
-        # QApplication.setOrganizationName("Zeonic")
-        # QApplication.setApplicationName("Chrono Filer")
-
-        # self.settings = QSettings()
 
         self._create_panels()
         self._create_menus()
@@ -129,17 +126,105 @@ class MainWindow(QMainWindow):
                 print("Warning: Could not connect to preview_panel.update_preview.")
         else:
             print("Warning: file_browser_panel.selection_changed signal not found.")
+        self.undo_manager.stack_changed.connect(self.on_undo_stack_changed)
+        self.undo_manager.command_executed.connect(self.on_command_executed)
+
+        self.undo_manager.batch_operation_started.connect(self.pause_file_watching)
+        self.undo_manager.batch_operation_finished.connect(self.resume_file_watching)
+
+
+    def pause_file_watching(self):
+        # Temporarily disable file system watching/refreshing
+        if hasattr(self, 'file_browser_panel'):
+            self.file_browser_panel.blockSignals(True)
+        # Or pause QFileSystemModel updates, etc.
+
+    def resume_file_watching(self):
+        # Re-enable file system watching and do a single refresh
+        if hasattr(self, 'file_browser_panel'):
+            self.file_browser_panel.blockSignals(False)
+        # Trigger a single refresh instead of per-file updates
+        self.preview_panel.update_preview()
+
+    def on_command_executed(self, status_message: str):
+            """
+            Slot called after an undo or redo operation is attempted.
+            Refreshes the UI and updates the status bar.
+            """
+            print(f"Command executed with status: {status_message}")
+            self.statusBar().showMessage(status_message, 5000)
+
+            self.file_browser_panel.refresh_list()
+
+    def on_undo_stack_changed(self, can_undo: bool, can_redo: bool):
+            """Slot to enable/disable Undo/Redo menu actions."""
+            self.undo_action.setEnabled(can_undo)
+            self.redo_action.setEnabled(can_redo)
+            # Update action text to show what will be undone (optional but nice)
+            if can_undo:
+                command_description = self.undo_manager.undo_stack[-1].description
+                self.undo_action.setText(f"Undo {command_description}")
+            else:
+                self.undo_action.setText("Undo")
+
+            if can_redo:
+                command_description = self.undo_manager.redo_stack[-1].description
+                self.redo_action.setText(f"Redo {command_description}")
+            else:
+                self.redo_action.setText("Redo")
 
     def _create_menus(self):
-        # ... (menu creation remains the same)
+        """Create and configure the application menu bar."""
         menu_bar = self.menuBar()
+
+        self._create_file_menu(menu_bar)
+        self._create_edit_menu(menu_bar)
+        self._create_help_menu(menu_bar)
+
+    def _create_file_menu(self, menu_bar):
+        """Create the File menu with its actions."""
         file_menu = menu_bar.addMenu("&File")
         file_menu.addAction("E&xit", self.close)
+
+    def _create_edit_menu(self, menu_bar):
+        """Create the Edit menu with undo/redo actions."""
         edit_menu = menu_bar.addMenu("&Edit")
-        view_menu = menu_bar.addMenu("&View")
-        tools_menu = menu_bar.addMenu("&Tools")
+
+        # Create undo action
+        self.undo_action = self._create_action(
+            text="Undo",
+            shortcut=Qt.Key.Key_Z | Qt.KeyboardModifier.ControlModifier,
+            slot=self.undo_manager.undo,
+            enabled=False
+        )
+        edit_menu.addAction(self.undo_action)
+
+        # Create redo action
+        self.redo_action = self._create_action(
+            text="Redo",
+            shortcut=Qt.Key.Key_Y | Qt.KeyboardModifier.ControlModifier,
+            slot=self.undo_manager.redo,
+            enabled=False
+        )
+        edit_menu.addAction(self.redo_action)
+
+    def _create_help_menu(self, menu_bar):
+        """Create the Help menu with its actions."""
         help_menu = menu_bar.addMenu("&Help")
         help_menu.addAction("&About")
+
+    def _create_action(self, text, shortcut=None, slot=None, enabled=True):
+        """Helper method to create QAction with common configuration."""
+        action = QAction(text, self)
+
+        if shortcut:
+            action.setShortcut(shortcut)
+        if slot:
+            action.triggered.connect(slot)
+
+        action.setEnabled(enabled)
+        return action
+
 
 
     def _create_status_bar(self):
@@ -271,7 +356,23 @@ class MainWindow(QMainWindow):
 
             self.organization_config_panel.organize_button.setEnabled(True)
 
-            was_cancelled = any("Cancelled" in r[2] for r in results if len(r) > 2)
+            was_cancelled = any("Cancelled" in r[2] for r in results if len(r) > 2 and r[2])
+
+            is_dry_run = self.organization_worker.settings.dry_run if self.organization_worker else True
+            if not is_dry_run and not was_cancelled:
+                # Filter for successful moves to include in the undo command
+                successful_moves = []
+                for result_item in results:
+                    if len(result_item) == 3:
+                        source_path, target_path, status_msg = result_item
+                        # Consider "Moved", "Overwritten", "Renamed" as successful operations to be undone
+                        if status_msg and (status_msg.startswith("Moved") or status_msg.startswith("Overwritten")):
+                            # For undo, we need the original source and final destination
+                            successful_moves.append((source_path, target_path))
+
+                if successful_moves:
+                    command = BatchMoveCommand(successful_moves)
+                    self.undo_manager.add_command(command)
 
             if was_cancelled:
                 QMessageBox.warning(self, "Operation Cancelled", "File organization was cancelled by the user.")
@@ -292,7 +393,7 @@ class MainWindow(QMainWindow):
                     else:
                         failed_ops_details.append(("Unknown item", "Malformed result from worker"))
 
-                total_processed_or_attempted = len(results)
+                # total_processed_or_attempted = len(results)
 
                 if not failed_ops_details:
                     QMessageBox.information(self, "Organization Complete",
