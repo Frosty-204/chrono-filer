@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QGroupBox, QFormLayout, QComboBox, QDateEdit,
     QSpinBox, QCheckBox, QScrollArea, QDialog,
     QTableWidget, QTableWidgetItem, QAbstractItemView, QMessageBox,
-    QFileDialog
+    QFileDialog, QTabWidget
 
 )
 from PySide6.QtGui import QPalette, QColor, QPixmap
@@ -23,6 +23,7 @@ from PySide6.QtCore import Qt, Signal, QDate
 
 @dataclass
 class OrganizationSettings:
+    # Common settings for both modes
     name_filter_text: str = ""
     name_filter_type: str = "Contains"
     type_filter_text: str = ""
@@ -30,11 +31,19 @@ class OrganizationSettings:
     modified_before_date: Optional[datetime.date] = None
     size_min_kb: int = 0
     size_max_kb: int = -1
-    structure_template: str = "[YYYY]/[MM]/[Filename].[Ext]"
-    conflict_resolution: str = "Skip" # "Overwrite", "Rename with Suffix"
+    conflict_resolution: str = "Skip"  # "Overwrite", "Rename with Suffix"
     dry_run: bool = True
+    process_recursively: bool = False
+
+    # Organize-specific settings
+    structure_template: str = "[YYYY]/[MM]/[Filename].[Ext]"
     target_base_directory: Optional[pathlib.Path] = None
-    process_recursively:bool = False
+
+    # Rename-specific settings
+    rename_template: str = "[Filename]_[Num]"
+    rename_start_number: int = 1
+    rename_template_padding: int = 4
+
 
 class PlaceholderWidget(QWidget):
     def __init__(self, name, color_name="lightgray", parent=None):
@@ -343,7 +352,9 @@ class PreviewPanel(QWidget):
             if file_suffix in image_extensions or is_image_mime:
                 pixmap = QPixmap(str(path_obj))
                 if not pixmap.isNull():
-                    self.image_label.setPixmap(pixmap)
+                    # Scale the pixmap to fit the label, preserving aspect ratio
+                    scaled_pixmap = pixmap.scaled(self.image_label.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                    self.image_label.setPixmap(scaled_pixmap)
                     self.stacked_widget.setCurrentWidget(self.image_scroll_area)
                 else:
                     # This is a genuine image loading failure
@@ -400,7 +411,16 @@ class PreviewPanel(QWidget):
             self.stacked_widget.setCurrentWidget(self.unsupported_label)
 
 class OrganizationConfigPanel(QWidget):
-    organize_triggered = Signal(OrganizationSettings) # type: ignore
+    organize_triggered = Signal(OrganizationSettings)
+    rename_triggered = Signal(OrganizationSettings)
+
+    RENAME_PRESET_TEMPLATES = {
+        "Custom": "",
+        "Filename - Sequence": "[Filename]_[Num]",
+        "Date - Filename": "[YYYY]-[MM]-[DD] - [Filename]",
+        "Image - Sequence": "IMG_[Num]",
+        "Regex Group 1 - Filename": "[RegexGroup1] - [Filename]",
+    }
 
     PRESET_TEMPLATES = {
         "Custom": "", # Special value, means use QLineEdit directly
@@ -427,7 +447,7 @@ class OrganizationConfigPanel(QWidget):
         container_widget.setLayout(container_layout)
 
 
-        # --- Filters Group ---
+        # --- Filters Group (Common to both modes) ---
         filters_group = QGroupBox("Filtering Criteria")
         filters_layout = QFormLayout(filters_group)
 
@@ -452,7 +472,7 @@ class OrganizationConfigPanel(QWidget):
         self.type_filter_text.setPlaceholderText("e.g., .txt, .jpg, image/png")
         filters_layout.addRow("File Type/Extension:", self.type_filter_text)
 
-        # Date Filters (Simplified for now, can add QCalendarWidget later for ranges)
+        # Date Filters
         self.created_after_date = QDateEdit()
         self.created_after_date.setCalendarPopup(True)
         self.created_after_date.setDisplayFormat("yyyy-MM-dd")
@@ -468,12 +488,12 @@ class OrganizationConfigPanel(QWidget):
         # Size Filters
         size_filter_layout = QHBoxLayout()
         self.size_min_spinbox = QSpinBox()
-        self.size_min_spinbox.setRange(0, 1024 * 1024) # 0 B to 1 TB (in KB, MB, GB later)
+        self.size_min_spinbox.setRange(0, 1024 * 1024)
         self.size_min_spinbox.setSuffix(" KB")
         self.size_max_spinbox = QSpinBox()
         self.size_max_spinbox.setRange(0, 1024 * 1024)
         self.size_max_spinbox.setSuffix(" KB")
-        self.size_max_spinbox.setValue(1024 * 1024) # Default max
+        self.size_max_spinbox.setValue(1024 * 1024)
         size_filter_layout.addWidget(QLabel("Min:"))
         size_filter_layout.addWidget(self.size_min_spinbox)
         size_filter_layout.addWidget(QLabel("Max:"))
@@ -482,6 +502,45 @@ class OrganizationConfigPanel(QWidget):
 
         container_layout.addWidget(filters_group)
 
+        # --- Tab Widget for Organize and Rename ---
+        self.action_tabs = QTabWidget()
+        container_layout.addWidget(self.action_tabs)
+
+        # --- Create Organize Tab ---
+        organize_tab_widget = QWidget()
+        self._create_organize_tab(organize_tab_widget)
+        self.action_tabs.addTab(organize_tab_widget, "Organize")
+
+        # --- Create Rename Tab ---
+        rename_tab_widget = QWidget()
+        self._create_rename_tab(rename_tab_widget)
+        self.action_tabs.addTab(rename_tab_widget, "Rename")
+
+
+        # Add a spacer at the bottom of the container to push content up
+        container_layout.addStretch(1)
+        self.setLayout(self.main_layout)
+
+        # --- Connect Signals ---
+        self.organize_button.clicked.connect(self._on_organize_clicked)
+        self.rename_button.clicked.connect(self._on_rename_clicked)
+
+        self.structure_preset_combo.currentTextChanged.connect(self._on_structure_preset_changed)
+        self.rename_preset_combo.currentTextChanged.connect(self._on_rename_preset_changed)
+
+        self.template_info_button.clicked.connect(self._show_template_info)
+        self.rename_template_info_button.clicked.connect(self._show_template_info) # Reuse same info dialog
+
+        self.browse_target_button.clicked.connect(self._on_browse_target_directory)
+
+        # Initial state for template edits
+        self._on_structure_preset_changed(self.structure_preset_combo.currentText())
+        self._on_rename_preset_changed(self.rename_preset_combo.currentText())
+
+
+    def _create_organize_tab(self, tab_widget):
+        """Creates the UI for the 'Organize' tab."""
+        tab_layout = QVBoxLayout(tab_widget)
 
         # --- Output Structure Group ---
         output_group = QGroupBox("Output Configuration")
@@ -496,20 +555,20 @@ class OrganizationConfigPanel(QWidget):
         target_base_layout.addWidget(self.target_base_dir_edit)
         target_base_layout.addWidget(self.browse_target_button)
         output_layout.addLayout(target_base_layout)
+
         preset_label = QLabel("Structure Template Preset:")
-        output_layout.addWidget(preset_label) # Add a label for the preset combo
+        output_layout.addWidget(preset_label)
         self.structure_preset_combo = QComboBox()
         self.structure_preset_combo.addItems(list(self.PRESET_TEMPLATES.keys()))
         output_layout.addWidget(self.structure_preset_combo)
 
-
-        template_edit_label = QLabel("Structure Template:") # Add a label
+        template_edit_label = QLabel("Structure Template:")
         output_layout.addWidget(template_edit_label)
         template_edit_layout = QHBoxLayout()
         self.structure_template_edit = QLineEdit()
         self.structure_template_edit.setPlaceholderText("Define custom structure or see preset")
-        default_preset_key = "Year-Month/Filename"
-        self.structure_template_edit.setText(self.PRESET_TEMPLATES.get(default_preset_key, "[YYYY]-[MM]/[Filename].[Ext]"))
+        default_preset_key = "Year/Month/Filename"
+        self.structure_template_edit.setText(self.PRESET_TEMPLATES.get(default_preset_key, "[YYYY]/[MM]/[Filename].[Ext]"))
         self.structure_preset_combo.setCurrentText(default_preset_key)
         template_edit_layout.addWidget(self.structure_template_edit)
         self.template_info_button = QPushButton()
@@ -517,188 +576,261 @@ class OrganizationConfigPanel(QWidget):
         self.template_info_button.setToolTip("Show available template placeholders")
         template_edit_layout.addWidget(self.template_info_button)
         output_layout.addLayout(template_edit_layout)
-
-        container_layout.addWidget(output_group)
+        tab_layout.addWidget(output_group)
 
         # --- Actions Group ---
         actions_group = QGroupBox("Actions")
-        actions_layout = QHBoxLayout(actions_group) # Use QHBoxLayout for buttons side-by-side
+        actions_layout = QHBoxLayout(actions_group)
 
         self.conflict_resolution_combo = QComboBox()
         self.conflict_resolution_combo.addItems(["Skip", "Overwrite", "Rename with Suffix"])
         actions_layout.addWidget(QLabel("Filename Conflicts:"))
         actions_layout.addWidget(self.conflict_resolution_combo)
-        actions_layout.addStretch() # Push buttons to the right or spread them
+        actions_layout.addStretch()
 
         self.dry_run_checkbox = QCheckBox("Dry Run (Preview Changes)")
-        self.dry_run_checkbox.setChecked(True) # Default to dry run
+        self.dry_run_checkbox.setChecked(True)
         actions_layout.addWidget(self.dry_run_checkbox)
 
         self.organize_button = QPushButton("Organize Files")
-        # self.organize_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogApplyButton)) # Example Icon
         actions_layout.addWidget(self.organize_button)
+        tab_layout.addWidget(actions_group)
 
-        container_layout.addWidget(actions_group)
+        tab_layout.addStretch(1) # Pushes content to the top
 
-        # Add a spacer at the bottom of the container to push content up if scroll area is larger
-        container_layout.addStretch(1)
-        self.setLayout(self.main_layout)
+    def _create_rename_tab(self, tab_widget):
+        """Creates the UI for the 'Rename' tab."""
+        tab_layout = QVBoxLayout(tab_widget)
 
-        self.organize_button.clicked.connect(self._on_organize_clicked)
+        # --- Rename Template Group ---
+        rename_group = QGroupBox("Rename Configuration")
+        rename_layout = QVBoxLayout(rename_group)
 
-        # added dropdown
-        self.structure_preset_combo.currentTextChanged.connect(self._on_structure_preset_changed)
-        self.template_info_button.clicked.connect(self._show_template_info)
-        self.browse_target_button.clicked.connect(self._on_browse_target_directory)
+        preset_label = QLabel("Rename Template Preset:")
+        rename_layout.addWidget(preset_label)
+        self.rename_preset_combo = QComboBox()
+        self.rename_preset_combo.addItems(list(self.RENAME_PRESET_TEMPLATES.keys()))
+        rename_layout.addWidget(self.rename_preset_combo)
 
-        # Initial state for template edit based on "Custom" or other preset
-        self._on_structure_preset_changed(self.structure_preset_combo.currentText())
+        template_edit_label = QLabel("Rename Template (extension is preserved):")
+        rename_layout.addWidget(template_edit_label)
+        template_edit_layout = QHBoxLayout()
+        self.rename_template_edit = QLineEdit()
+        self.rename_template_edit.setPlaceholderText("Define custom rename format or see preset")
+        default_preset_key = "Filename - Sequence"
+        self.rename_template_edit.setText(self.RENAME_PRESET_TEMPLATES.get(default_preset_key, "[Filename]_[Num]"))
+        self.rename_preset_combo.setCurrentText(default_preset_key)
+        template_edit_layout.addWidget(self.rename_template_edit)
+        self.rename_template_info_button = QPushButton()
+        self.rename_template_info_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxInformation))
+        self.rename_template_info_button.setToolTip("Show available template placeholders")
+        template_edit_layout.addWidget(self.rename_template_info_button)
+        rename_layout.addLayout(template_edit_layout)
 
+        # --- Sequence Number Options ---
+        sequence_layout = QHBoxLayout()
+        self.rename_start_spinbox = QSpinBox()
+        self.rename_start_spinbox.setRange(0, 99999)
+        self.rename_start_spinbox.setValue(1)
+        sequence_layout.addWidget(QLabel("Start Number:"))
+        sequence_layout.addWidget(self.rename_start_spinbox)
+
+        self.rename_padding_spinbox = QSpinBox()
+        self.rename_padding_spinbox.setRange(0, 10)
+        self.rename_padding_spinbox.setValue(4)
+        sequence_layout.addWidget(QLabel("Number Padding (zeros):"))
+        sequence_layout.addWidget(self.rename_padding_spinbox)
+        sequence_layout.addStretch()
+        rename_layout.addLayout(sequence_layout)
+
+        tab_layout.addWidget(rename_group)
+
+        # --- Actions Group for Rename ---
+        actions_group = QGroupBox("Actions")
+        actions_layout = QHBoxLayout(actions_group)
+
+        # Conflict resolution is also applicable here
+        self.rename_conflict_resolution_combo = QComboBox()
+        self.rename_conflict_resolution_combo.addItems(["Skip", "Overwrite", "Rename with Suffix"])
+        actions_layout.addWidget(QLabel("Filename Conflicts:"))
+        actions_layout.addWidget(self.rename_conflict_resolution_combo)
+        actions_layout.addStretch()
+
+        self.rename_dry_run_checkbox = QCheckBox("Dry Run (Preview Changes)")
+        self.rename_dry_run_checkbox.setChecked(True)
+        actions_layout.addWidget(self.rename_dry_run_checkbox)
+
+        self.rename_button = QPushButton("Rename Files")
+        actions_layout.addWidget(self.rename_button)
+        tab_layout.addWidget(actions_group)
+
+        tab_layout.addStretch(1)
 
     def _on_browse_target_directory(self):
+        # This now correctly references the file_browser_panel_ref passed in __init__
+        start_path = self.target_base_dir_edit.text()
+        if not start_path and self.file_browser_panel_ref:
+            start_path = self.file_browser_panel_ref.current_path
+
         directory = QFileDialog.getExistingDirectory(
-            self,
-            "Select Target Base Directory",
-            self.target_base_dir_edit.text() or self.file_browser_panel.current_path,
+            self, "Select Target Base Directory", start_path
         )
         if directory:
             self.target_base_dir_edit.setText(directory)
-
-
-    @property
-    def file_browser_panel(self): # Placeholder to remind us this needs a proper source
-        # In a real scenario, this should be passed in or accessed safely
-        if self.parent() and hasattr(self.parent().parent().parent(), 'file_browser_panel'): # Example of trying to reach MainWindow's attribute
-             return self.parent().parent().parent().file_browser_panel
-        return type('obj', (object,), {'current_path': str(pathlib.Path.home())})() # Dummy fallback
-
 
     def _on_structure_preset_changed(self, preset_name: str):
         template = self.PRESET_TEMPLATES.get(preset_name, "")
         if preset_name == "Custom":
             self.structure_template_edit.setEnabled(True)
-            # Optionally, you might want to clear it or leave the last custom/preset value
-            # self.structure_template_edit.clear()
         else:
             self.structure_template_edit.setText(template)
-            self.structure_template_edit.setEnabled(False) # Disable editing for presets
+            self.structure_template_edit.setEnabled(False)
+
+    def _on_rename_preset_changed(self, preset_name: str):
+        template = self.RENAME_PRESET_TEMPLATES.get(preset_name, "")
+        if preset_name == "Custom":
+            self.rename_template_edit.setEnabled(True)
+        else:
+            self.rename_template_edit.setText(template)
+            self.rename_template_edit.setEnabled(False)
 
     def _show_template_info(self):
         info_text = """
-        <b>Available Placeholders for Structure Template:</b><br><br>
+        <b>Available Placeholders:</b><br><br>
         - <code>[YYYY]</code>: Full year (e.g., 2023)<br>
         - <code>[MM]</code>: Month with leading zero (e.g., 01, 12)<br>
         - <code>[DD]</code>: Day of month with leading zero (e.g., 05, 31)<br>
         - <code>[Filename]</code>: Original filename without extension<br>
         - <code>[Ext]</code>: Original file extension (without the dot)<br>
-        - <code>[RegexGroup1]</code>, <code>[RegexGroup2]</code>, etc.:<br>
-             Corresponds to the 1st, 2nd, etc. capture group from the<br>
-             'Name' filter if 'Regex' mode is selected.<br>
-        - <code>[DetectedFileType]</code>: A general category for the file type<br>
-             (e.g., "Images", "Documents", "Videos", "Audio", "Archives", "Other").<br>
-             <i>(Based on MIME type)</i><br><br>
-        Example: <code>[YYYY]/[MM]/[MyPrefix]-[Filename].[Ext]</code>
+        - <code>[DetectedFileType]</code>: General category (e.g., "Images", "Documents")<br>
+        - <code>[RegexGroup1]</code>, etc.: Capture group from 'Name' filter.<br>
+        - <code>[Num]</code>: A sequence number (for Rename mode).<br><br>
+        <b>Organize Example:</b> <code>[YYYY]/[MM]/[Filename].[Ext]</code><br>
+        <b>Rename Example:</b> <code>MyPhoto_[Num]</code> (don't add .[Ext])
         """
         QMessageBox.information(self, "Structure Template Info", info_text)
 
-
     def _on_organize_clicked(self):
-                settings = self.get_current_settings()
-                self.organize_triggered.emit(settings)
+        settings = self.get_current_settings()
+        self.organize_triggered.emit(settings)
+
+    def _on_rename_clicked(self):
+        settings = self.get_current_settings()
+        self.rename_triggered.emit(settings)
 
     def get_current_settings(self) -> OrganizationSettings:
-                name_text = self.name_filter_text.text().strip()
-                name_type = self.name_filter_type.currentText()
-                type_text = self.type_filter_text.text().strip()
+        # --- Common Filters ---
+        name_text = self.name_filter_text.text().strip()
+        type_text = self.type_filter_text.text().strip()
+        created_val = self.created_after_date.date().toPython()
+        created_after = created_val if self.created_after_date.isEnabled() and created_val != datetime.date(2010, 1, 1) else None
+        modified_val = self.modified_before_date.date().toPython()
+        modified_before = modified_val if self.modified_before_date.isEnabled() and modified_val != datetime.date.today() else None
+        size_min = self.size_min_spinbox.value()
+        size_max = self.size_max_spinbox.value()
+        actual_size_max = -1 if size_max == self.size_max_spinbox.maximum() else size_max
+        process_recursively = self.process_recursively_checkbox.isChecked()
 
-                created_val = self.created_after_date.date().toPython()
-                created_after = created_val if created_val != datetime.date(2010, 1, 1) else None
+        # --- Tab-specific settings ---
+        current_tab_text = self.action_tabs.tabText(self.action_tabs.currentIndex())
+        if current_tab_text == "Organize":
+            conflict = self.conflict_resolution_combo.currentText()
+            dry_run = self.dry_run_checkbox.isChecked()
+            structure = self.structure_template_edit.text().strip()
+            target_base_dir_str = self.target_base_dir_edit.text().strip()
+            target_base = str(pathlib.Path(target_base_dir_str).expanduser().resolve()) if target_base_dir_str else None
+            rename_template = "" # Not relevant for organize mode
+            rename_start_num = 0
+            rename_padding = 0
+        else: # Rename
+            conflict = self.rename_conflict_resolution_combo.currentText()
+            dry_run = self.rename_dry_run_checkbox.isChecked()
+            structure = "" # Not relevant for rename mode
+            target_base = None
+            rename_template = self.rename_template_edit.text().strip()
+            rename_start_num = self.rename_start_spinbox.value()
+            rename_padding = self.rename_padding_spinbox.value()
 
-                modified_val = self.modified_before_date.date().toPython()
-                modified_before = modified_val if modified_val != datetime.date.today() else None
+        return OrganizationSettings(
+            name_filter_text=name_text,
+            name_filter_type=self.name_filter_type.currentText(),
+            type_filter_text=type_text,
+            created_after_date=created_after,
+            modified_before_date=modified_before,
+            size_min_kb=size_min,
+            size_max_kb=actual_size_max,
+            process_recursively=process_recursively,
+            conflict_resolution=conflict,
+            dry_run=dry_run,
+            structure_template=structure,
+            target_base_directory=target_base,
+            rename_template=rename_template,
+            rename_start_number=rename_start_num,
+            rename_template_padding=rename_padding
+        )
 
-                size_min = self.size_min_spinbox.value()
-                size_max = self.size_max_spinbox.value()
-
-                actual_size_max = -1 if size_max == self.size_max_spinbox.maximum() else size_max
-
-                process_recursively = self.process_recursively_checkbox.isChecked()
-
-                structure = self.structure_template_edit.text().strip()
-                if not structure and self.structure_preset_combo.currentText() != "Custom":
-                            structure = self.PRESET_TEMPLATES.get(self.structure_preset_combo.currentText(), "[YYYY]-[MM]/[Filename].[Ext]")
-                elif not structure and self.structure_preset_combo.currentText() == "Custom":
-                            structure = "[YYYY]-[MM]/[Filename].[Ext]" # Fallback if custom is empty
-
-                conflict = self.conflict_resolution_combo.currentText()
-                dry_run = self.dry_run_checkbox.isChecked()
-
-                target_base_dir_str = self.target_base_dir_edit.text().strip()
-                target_base = None
-                if target_base_dir_str:
-                    target_base = str(pathlib.Path(target_base_dir_str).expanduser().resolve())
-
-                return OrganizationSettings(
-                    name_filter_text=name_text,
-                    name_filter_type=self.name_filter_type.currentText(),
-                    type_filter_text=self.type_filter_text.text().strip(),
-                    created_after_date=created_after,
-                    modified_before_date=modified_before,
-                    size_min_kb=size_min, # Pass as is
-                    size_max_kb=actual_size_max, # Pass interpreted max
-                    structure_template=structure,
-                    target_base_directory=target_base,
-                    conflict_resolution=conflict,
-                    dry_run=dry_run,
-                    process_recursively=process_recursively
-                )
     def get_ui_state(self) -> dict[str, any]:
-            """Returns a dictionary representing the current state of the UI widgets."""
-            state = {
-                "name_filter_text": self.name_filter_text.text(),
-                "name_filter_type_index": self.name_filter_type.currentIndex(),
-                "type_filter_text": self.type_filter_text.text(),
-                "created_after_date": self.created_after_date.date().toString(Qt.DateFormat.ISODate),
-                "modified_before_date": self.modified_before_date.date().toString(Qt.DateFormat.ISODate),
-                "size_min_kb": self.size_min_spinbox.value(),
-                "size_max_kb": self.size_max_spinbox.value(),
-                "structure_preset_name": self.structure_preset_combo.currentText(),
-                "structure_template_text": self.structure_template_edit.text(),
-                "conflict_resolution_index": self.conflict_resolution_combo.currentIndex(),
-                "dry_run_checked": self.dry_run_checkbox.isChecked(),
-                "target_base_directory": self.target_base_dir_edit.text(),
-                "process_recursively_checked": self.process_recursively_checkbox.isChecked()
-            }
-            return state
+        """Returns a dictionary representing the current state of the UI widgets."""
+        state = {
+            "name_filter_text": self.name_filter_text.text(),
+            "name_filter_type_index": self.name_filter_type.currentIndex(),
+            "type_filter_text": self.type_filter_text.text(),
+            "created_after_date": self.created_after_date.date().toString(Qt.DateFormat.ISODate),
+            "modified_before_date": self.modified_before_date.date().toString(Qt.DateFormat.ISODate),
+            "size_min_kb": self.size_min_spinbox.value(),
+            "size_max_kb": self.size_max_spinbox.value(),
+            "process_recursively_checked": self.process_recursively_checkbox.isChecked(),
+            "active_tab_index": self.action_tabs.currentIndex(),
+
+            # Organize Tab
+            "structure_preset_name": self.structure_preset_combo.currentText(),
+            "structure_template_text": self.structure_template_edit.text(),
+            "conflict_resolution_index": self.conflict_resolution_combo.currentIndex(),
+            "dry_run_checked": self.dry_run_checkbox.isChecked(),
+            "target_base_directory": self.target_base_dir_edit.text(),
+
+            # Rename Tab
+            "rename_preset_name": self.rename_preset_combo.currentText(),
+            "rename_template_text": self.rename_template_edit.text(),
+            "rename_conflict_resolution_index": self.rename_conflict_resolution_combo.currentIndex(),
+            "rename_dry_run_checked": self.rename_dry_run_checkbox.isChecked(),
+            "rename_start_number": self.rename_start_spinbox.value(),
+            "rename_padding": self.rename_padding_spinbox.value(),
+        }
+        return state
 
     def set_ui_state(self, state: dict[str, any]):
         """Sets the state of the UI widgets from a dictionary."""
         self.name_filter_text.setText(state.get("name_filter_text", ""))
         self.name_filter_type.setCurrentIndex(state.get("name_filter_type_index", 0))
         self.type_filter_text.setText(state.get("type_filter_text", ""))
-
-        # Dates need to be parsed from ISO string
-        created_date_str = state.get("created_after_date")
-        if created_date_str:
-            self.created_after_date.setDate(QDate.fromString(created_date_str, Qt.DateFormat.ISODate))
-
-        modified_date_str = state.get("modified_before_date")
-        if modified_date_str:
-            self.modified_before_date.setDate(QDate.fromString(modified_date_str, Qt.DateFormat.ISODate))
-
+        if "created_after_date" in state:
+            self.created_after_date.setDate(QDate.fromString(state["created_after_date"], Qt.DateFormat.ISODate))
+        if "modified_before_date" in state:
+            self.modified_before_date.setDate(QDate.fromString(state["modified_before_date"], Qt.DateFormat.ISODate))
         self.size_min_spinbox.setValue(state.get("size_min_kb", 0))
         self.size_max_spinbox.setValue(state.get("size_max_kb", 1024*1024))
+        self.process_recursively_checkbox.setChecked(state.get("process_recursively_checked", False))
+        self.action_tabs.setCurrentIndex(state.get("active_tab_index", 0))
 
-        # Handle structure template carefully
-        preset_name = state.get("structure_preset_name", "Custom")
-        self.structure_preset_combo.setCurrentText(preset_name)
-        if preset_name == "Custom":
-            self.structure_template_edit.setText(state.get("structure_template_text", ""))
-
+        # Organize Tab
+        self.structure_preset_combo.setCurrentText(state.get("structure_preset_name", "Custom"))
+        self.structure_template_edit.setText(state.get("structure_template_text", ""))
         self.conflict_resolution_combo.setCurrentIndex(state.get("conflict_resolution_index", 0))
         self.dry_run_checkbox.setChecked(state.get("dry_run_checked", True))
         self.target_base_dir_edit.setText(state.get("target_base_directory", ""))
-        self.process_recursively_checkbox.setChecked(state.get("process_recursively_checked", False))
+
+        # Rename Tab
+        self.rename_preset_combo.setCurrentText(state.get("rename_preset_name", "Custom"))
+        self.rename_template_edit.setText(state.get("rename_template_text", ""))
+        self.rename_conflict_resolution_combo.setCurrentIndex(state.get("rename_conflict_resolution_index", 0))
+        self.rename_dry_run_checkbox.setChecked(state.get("rename_dry_run_checked", True))
+        self.rename_start_spinbox.setValue(state.get("rename_start_number", 1))
+        self.rename_padding_spinbox.setValue(state.get("rename_padding", 4))
+
+        # Ensure the enabled state of the template line edits is correct
+        self._on_structure_preset_changed(self.structure_preset_combo.currentText())
+        self._on_rename_preset_changed(self.rename_preset_combo.currentText())
 
 class DryRunResultsDialog(QDialog):
     def __init__(self, results: List[Tuple[pathlib.Path, pathlib.Path, str]],

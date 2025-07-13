@@ -34,3 +34,6 @@ MANIFEST
 # Qt specific (if any generated files appear)
 # For example, if you use Qt Designer .ui files and compile them
 # *_ui.py
+
+# gemini
+gemini.md

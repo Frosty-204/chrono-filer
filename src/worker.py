@@ -13,17 +13,18 @@ class OrganizationWorker(QThread):
     finished = Signal(list)
     error_occurred = Signal(str)
 
-    def __init__(self, settings: Any, source_directory: pathlib.Path, engine_class: Any, parent=None):
+    def __init__(self, settings: Any, source_directory: pathlib.Path, engine_class: Any, mode: str = "organize", parent=None):
         super().__init__(parent)
         self.settings = settings
         self.source_directory = source_directory
         self.engine_class = engine_class
+        self.mode = mode
         self._is_cancelled = False
 
     def run(self):
         results = []
         try:
-            engine = self.engine_class(self.settings, self.source_directory)
+            engine = self.engine_class(self.settings, self.source_directory, self.mode)
 
             # files_to_process_potentially = [
             #     item for item in self.source_directory.iterdir() if item.is_file()

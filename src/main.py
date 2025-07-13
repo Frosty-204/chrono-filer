@@ -37,14 +37,21 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Chrono Filer - v0.1.0")
         self.setGeometry(100, 100, 1280, 800)
 
+        # Create panels first
         self._create_panels()
-        self._create_menus()
-        self._create_status_bar()
+
+        # Then create the layout that arranges them
         self._create_main_layout()
+
+        # Now that all widgets are in place, connect signals
         self._connect_signals()
 
-        self.load_app_state()
+        # Create menus and status bar
+        self._create_menus()
+        self._create_status_bar()
 
+        # Load state and finish setup
+        self.load_app_state()
         self.organization_worker = None
         self.progress_dialog = None
 
@@ -101,34 +108,16 @@ class MainWindow(QMainWindow):
 
     def _connect_signals(self):
         # File Browser -> Metadata & Preview
-        if hasattr(self.file_browser_panel, 'selection_changed'):
-            if hasattr(self.metadata_panel, 'update_metadata'):
-                self.file_browser_panel.selection_changed.connect(self.metadata_panel.update_metadata)
-            if hasattr(self.preview_panel, 'update_preview'):
-                self.file_browser_panel.selection_changed.connect(self.preview_panel.update_preview)
+        self.file_browser_panel.selection_changed.connect(self.metadata_panel.update_metadata)
+        self.file_browser_panel.selection_changed.connect(self.preview_panel.update_preview)
 
-        # Organization Panel -> Start Organization
-        if hasattr(self.organization_config_panel, 'organize_triggered'):
-            self.organization_config_panel.organize_triggered.connect(self.on_start_organization)
-        else:
-            print("Warning: organization_config_panel.organize_triggered signal not found.")
+        # Connect signals for both organization and rename
+        self.organization_config_panel.organize_triggered.connect(self.on_start_organization)
+        self.organization_config_panel.rename_triggered.connect(self.on_start_rename)
 
-        # Connections remain the same
-        if hasattr(self.file_browser_panel, 'selection_changed'):
-            if hasattr(self.metadata_panel, 'update_metadata'):
-                self.file_browser_panel.selection_changed.connect(self.metadata_panel.update_metadata)
-            else:
-                print("Warning: Could not connect to metadata_panel.update_metadata.")
-
-            if hasattr(self.preview_panel, 'update_preview'):
-                self.file_browser_panel.selection_changed.connect(self.preview_panel.update_preview)
-            else:
-                print("Warning: Could not connect to preview_panel.update_preview.")
-        else:
-            print("Warning: file_browser_panel.selection_changed signal not found.")
+        # Undo/Redo Manager
         self.undo_manager.stack_changed.connect(self.on_undo_stack_changed)
         self.undo_manager.command_executed.connect(self.on_command_executed)
-
         self.undo_manager.batch_operation_started.connect(self.pause_file_watching)
         self.undo_manager.batch_operation_finished.connect(self.resume_file_watching)
 
@@ -231,112 +220,109 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Ready")
 
     def _create_main_layout(self):
-        # --- Instantiate Panels ---
-        self.file_browser_panel = FileBrowserPanel()
-        self.preview_panel = PreviewPanel()
-        self.metadata_panel = MetadataPanel()
-        self.organization_config_panel = OrganizationConfigPanel() # Now a regular widget
-
         # --- Bottom Right Tab Widget ---
-        self.bottom_right_tabs = QTabWidget()
+        # This uses the panels created in _create_panels()
         self.bottom_right_tabs.addTab(self.metadata_panel, "Metadata")
-        self.bottom_right_tabs.addTab(self.organization_config_panel, "Organization")
+        self.bottom_right_tabs.addTab(self.organization_config_panel, "Actions") # Renamed for clarity
 
         # --- Right Vertical Splitter ---
-        # Contains PreviewPanel on top, and the TabWidget on the bottom
         right_splitter = QSplitter(Qt.Orientation.Vertical)
         right_splitter.addWidget(self.preview_panel)
         right_splitter.addWidget(self.bottom_right_tabs)
-
-        # Adjust stretch factors: Give more space to the preview panel
-        right_splitter.setStretchFactor(0, 3) # Preview panel (e.g., 3 parts of available space)
-        right_splitter.setStretchFactor(1, 1) # Tab widget (e.g., 1 part of available space)
-        right_splitter.setSizes([550, 250]) # Adjusted initial sizes
-        # You might want to set initial sizes too, e.g., right_splitter.setSizes([600, 200])
+        right_splitter.setStretchFactor(0, 3)
+        right_splitter.setStretchFactor(1, 1)
+        right_splitter.setSizes([550, 250])
 
         # --- Main Horizontal Splitter ---
         main_splitter = QSplitter(Qt.Orientation.Horizontal)
         main_splitter.addWidget(self.file_browser_panel)
         main_splitter.addWidget(right_splitter)
-
-        main_splitter.setStretchFactor(0, 1) # File browser (e.g., 1 part)
-        main_splitter.setStretchFactor(1, 2) # Give more space to the right side
-        main_splitter.setSizes([350, 930])   # Adjusted initial sizes
-
+        main_splitter.setStretchFactor(0, 1)
+        main_splitter.setStretchFactor(1, 2)
+        main_splitter.setSizes([350, 930])
 
         self.setCentralWidget(main_splitter)
 
+    def on_start_rename(self, settings: OrganizationSettings):
+        """Slot to handle the rename_triggered signal."""
+        self._start_worker(settings, mode="rename")
+
     def on_start_organization(self, settings: OrganizationSettings):
-           current_browse_path_str = self.file_browser_panel.current_path
-           source_directory = pathlib.Path(current_browse_path_str).resolve()
+        """Slot to handle the organize_triggered signal."""
+        self._start_worker(settings, mode="organize")
 
-           if not source_directory.is_dir():
-               QMessageBox.critical(self, "Error", f"The selected source path '{source_directory}' is not a valid directory.")
-               return
+    def _start_worker(self, settings: OrganizationSettings, mode: str):
+        current_browse_path_str = self.file_browser_panel.current_path
+        source_directory = pathlib.Path(current_browse_path_str).resolve()
 
-           # effective_output_base = pathlib.Path(settings.target_base_directory).resolve() \
-           #                                 if settings.target_base_directory \
-           #                                 else source_directory.resolve()
-           effective_output_base = source_directory
+        if not source_directory.is_dir():
+            QMessageBox.critical(self, "Error", f"The selected source path '{source_directory}' is not a valid directory.")
+            return
 
-           if settings.target_base_directory and not effective_output_base.exists():
+        # --- Target Directory Validation (Only for Organize Mode) ---
+        if mode == "organize":
+            effective_output_base = source_directory
+            if settings.target_base_directory:
                 effective_output_base = pathlib.Path(settings.target_base_directory)
-                reply = QMessageBox.question(self, "Create Target Directory?",
-                                            f"The target base directory:\n{effective_output_base}\ndoes not exist. Create it?",
-                                            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                                            QMessageBox.StandardButton.No)
-                if reply == QMessageBox.StandardButton.Yes:
-                    try:
-                        effective_output_base.mkdir(parents=True, exist_ok=True)
-                        self.statusBar().showMessage(f"Created target base directory: {effective_output_base}", 3000)
-                    except Exception as e:
-                        QMessageBox.critical(self, "Error", f"Could not create target base directory:\n{effective_output_base}\nError: {e}")
+                if not effective_output_base.exists():
+                    reply = QMessageBox.question(self, "Create Target Directory?",
+                                                 f"The target base directory:\n{effective_output_base}\ndoes not exist. Create it?",
+                                                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                                 QMessageBox.StandardButton.No)
+                    if reply == QMessageBox.StandardButton.Yes:
+                        try:
+                            effective_output_base.mkdir(parents=True, exist_ok=True)
+                            self.statusBar().showMessage(f"Created target base directory: {effective_output_base}", 3000)
+                        except Exception as e:
+                            QMessageBox.critical(self, "Error", f"Could not create target base directory:\n{effective_output_base}\nError: {e}")
+                            return
+                    else:
+                        self.statusBar().showMessage("Target base directory creation cancelled. Operation aborted.", 3000)
                         return
-                else:
-                    self.statusBar().showMessage("Target base directory creation cancelled. Organization aborted.", 3000)
+                elif not effective_output_base.is_dir():
+                    QMessageBox.critical(self, "Error", f"The specified target base path:\n{effective_output_base}\nis not a directory.")
                     return
-           elif settings.target_base_directory and not effective_output_base.is_dir():
-                QMessageBox.critical(self, "Error", f"The specified target base path:\n{effective_output_base}\nis not a directory.")
+        else:
+            effective_output_base = source_directory # For rename, output is same as source
+
+        # --- Dry Run ---
+        if settings.dry_run:
+            self.statusBar().showMessage(f"Performing Dry Run on: {source_directory.name}...", 3000)
+            engine = OrganizationEngine(settings, source_directory, mode)
+            dry_run_results = []
+            files_to_check_dry_run = [item for item in source_directory.iterdir() if item.is_file()]
+            if not files_to_check_dry_run:
+                QMessageBox.information(self, "Dry Run Results", "No files found in source directory to process.")
+                self.statusBar().showMessage("Dry run: No files found.", 5000)
                 return
 
-           if settings.dry_run:
-                self.statusBar().showMessage(f"Performing Dry Run on: {source_directory.name}...", 3000)
-                engine = OrganizationEngine(settings, source_directory)
-                dry_run_results = []
-                files_to_check_dry_run = [item for item in source_directory.iterdir() if item.is_file()]
-                if not files_to_check_dry_run:
-                    QMessageBox.information(self, "Dry Run Results", "No files found in source directory to process.")
-                    self.statusBar().showMessage("Dry run: No files found.", 5000)
-                    return
+            for src_path, target_path, status_message in engine.process_files_generator(files_to_check_dry_run):
+                dry_run_results.append((src_path, target_path, status_message))
 
-                for src_path, target_path, status_message in engine.process_files_generator(files_to_check_dry_run):
-                    dry_run_results.append((src_path, target_path, status_message))
+            self.statusBar().showMessage(f"Dry run complete. {len(dry_run_results)} potential actions.", 5000)
+            self._show_dry_run_results_dialog(dry_run_results, source_directory, effective_output_base)
+            return
 
-                self.statusBar().showMessage(f"Dry run complete. {len(dry_run_results)} potential actions.", 5000)
-                self._show_dry_run_results_dialog(dry_run_results, source_directory, effective_output_base)
-           else:
+        # --- Live Run ---
+        self.statusBar().showMessage(f"Starting {mode} for: {source_directory.name}...", 0)
+        self.organization_config_panel.organize_button.setEnabled(False)
+        self.organization_config_panel.rename_button.setEnabled(False)
 
-               self.statusBar().showMessage(f"Starting organization for: {source_directory.name}...", 0)
-               self.organization_config_panel.organize_button.setEnabled(False)
-               self.progress_dialog = QProgressDialog("Organizing files...", "Cancel", 0, 100, self)
+        self.progress_dialog = QProgressDialog(f"{mode.capitalize()} files...", "Cancel", 0, 100, self)
+        self.progress_dialog.setWindowTitle("Processing")
+        self.progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        self.progress_dialog.setAutoClose(False)
+        self.progress_dialog.setAutoReset(False)
+        self.progress_dialog.setValue(0)
 
+        self.organization_worker = OrganizationWorker(settings, source_directory, OrganizationEngine, mode)
+        self.organization_worker.progress_updated.connect(self._on_worker_progress)
+        self.organization_worker.finished.connect(self._on_worker_finished)
+        self.organization_worker.error_occurred.connect(self._on_worker_error)
+        self.progress_dialog.canceled.connect(self.organization_worker.cancel)
 
-               self.progress_dialog.setWindowTitle("Processing")
-               self.progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
-               self.progress_dialog.setAutoClose(False)
-               self.progress_dialog.setAutoReset(False)
-               self.progress_dialog.setValue(0)
-
-               self.organization_worker = OrganizationWorker(settings, source_directory, OrganizationEngine)
-
-               self.organization_worker.progress_updated.connect(self._on_worker_progress)
-               self.organization_worker.finished.connect(self._on_worker_finished)
-               self.organization_worker.error_occurred.connect(self._on_worker_error)
-
-               self.progress_dialog.canceled.connect(self.organization_worker.cancel)
-
-               self.organization_worker.start()
-               self.progress_dialog.show()
+        self.organization_worker.start()
+        self.progress_dialog.show()
 
     def _on_worker_progress(self, current_item: int, total_items: int, message: str):
             if self.progress_dialog:
@@ -349,75 +335,73 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage(message, 3000)
 
     def _on_worker_finished(self, results: list):
-            if self.progress_dialog:
-                self.progress_dialog.setValue(self.progress_dialog.maximum())
-                self.progress_dialog.close()
-                self.progress_dialog = None
+        if self.progress_dialog:
+            self.progress_dialog.setValue(self.progress_dialog.maximum())
+            self.progress_dialog.close()
+            self.progress_dialog = None
 
-            self.organization_config_panel.organize_button.setEnabled(True)
+        # Re-enable buttons
+        self.organization_config_panel.organize_button.setEnabled(True)
+        self.organization_config_panel.rename_button.setEnabled(True)
 
-            was_cancelled = any("Cancelled" in r[2] for r in results if len(r) > 2 and r[2])
+        if not self.organization_worker:
+            return # Should not happen, but good practice
 
-            is_dry_run = self.organization_worker.settings.dry_run if self.organization_worker else True
-            if not is_dry_run and not was_cancelled:
-                # Filter for successful moves to include in the undo command
-                successful_moves = []
-                for result_item in results:
-                    if len(result_item) == 3:
-                        source_path, target_path, status_msg = result_item
-                        # Consider "Moved", "Overwritten", "Renamed" as successful operations to be undone
-                        if status_msg and (status_msg.startswith("Moved") or status_msg.startswith("Overwritten")):
-                            # For undo, we need the original source and final destination
-                            successful_moves.append((source_path, target_path))
+        mode = self.organization_worker.mode
+        was_cancelled = any("Cancelled" in r[2] for r in results if len(r) > 2 and r[2])
 
-                if successful_moves:
-                    command = BatchMoveCommand(successful_moves)
-                    self.undo_manager.add_command(command)
+        if not self.organization_worker.settings.dry_run and not was_cancelled:
+            successful_moves = []
+            for result_item in results:
+                if len(result_item) == 3:
+                    source_path, target_path, status_msg = result_item
+                    if status_msg and (status_msg.startswith("Moved") or status_msg.startswith("Overwritten") or status_msg.startswith("Renamed")):
+                        successful_moves.append((source_path, target_path))
 
-            if was_cancelled:
-                QMessageBox.warning(self, "Operation Cancelled", "File organization was cancelled by the user.")
-                self.statusBar().showMessage("Organization cancelled.", 5000)
-            else:
-                successful_ops = 0
-                failed_ops_details = []
+            if successful_moves:
+                command = BatchMoveCommand(successful_moves)
+                command.description = f"{mode.capitalize()}d {len(successful_moves)} file(s)"
+                self.undo_manager.add_command(command)
 
-                for result_item in results:
-                    if len(result_item) == 3:
-                        source_path, target_path, status_msg = result_item
-
-                        if status_msg and (status_msg.startswith("Error") or status_msg.startswith("Shutil Error")):
-                            source_name = source_path.name if source_path else "Unknown source"
-                            failed_ops_details.append((source_name, status_msg))
-                        elif not status_msg.startswith("Skipped"):
-                            successful_ops += 1
-                    else:
-                        failed_ops_details.append(("Unknown item", "Malformed result from worker"))
-
-                # total_processed_or_attempted = len(results)
-
-                if not failed_ops_details:
-                    QMessageBox.information(self, "Organization Complete",
-                                            f"{successful_ops} file operations completed successfully.")
-                    self.statusBar().showMessage("Organization complete.", 5000)
+        if was_cancelled:
+            QMessageBox.warning(self, "Operation Cancelled", f"File {mode} was cancelled by the user.")
+            self.statusBar().showMessage(f"{mode.capitalize()} cancelled.", 5000)
+        else:
+            successful_ops = 0
+            failed_ops_details = []
+            for result_item in results:
+                if len(result_item) == 3:
+                    source_path, target_path, status_msg = result_item
+                    if status_msg and (status_msg.startswith("Error") or status_msg.startswith("Shutil Error")):
+                        source_name = source_path.name if source_path else "Unknown source"
+                        failed_ops_details.append((source_name, status_msg))
+                    elif not status_msg.startswith("Skipped") and not status_msg.startswith("Already in place"):
+                        successful_ops += 1
                 else:
-                    summary_message = (
-                        f"Organization finished with errors.\n\n"
-                        f"Successfully processed: {successful_ops} item(s).\n"
-                        f"Failed to process: {len(failed_ops_details)} item(s).\n\n"
-                        "First few errors:\n"
-                    )
-                    for i, (name, err) in enumerate(failed_ops_details):
-                        if i < 5:
-                            summary_message += f"- {name}: {err}\n"
-                        else:
-                            summary_message += "\n...and more. Check console output for all errors."
-                            break
+                    failed_ops_details.append(("Unknown item", "Malformed result from worker"))
 
-                    QMessageBox.warning(self, "Organization Complete with Errors", summary_message)
-                    self.statusBar().showMessage(f"Organization complete with {len(failed_ops_details)} errors.", 5000)
+            if not failed_ops_details:
+                QMessageBox.information(self, f"{mode.capitalize()} Complete",
+                                        f"{successful_ops} file operations completed successfully.")
+                self.statusBar().showMessage(f"{mode.capitalize()} complete.", 5000)
+            else:
+                summary_message = (
+                    f"{mode.capitalize()} finished with errors.\n\n"
+                    f"Successfully processed: {successful_ops} item(s).\n"
+                    f"Failed to process: {len(failed_ops_details)} item(s).\n\n"
+                    "First few errors:\n"
+                )
+                for i, (name, err) in enumerate(failed_ops_details):
+                    if i < 5:
+                        summary_message += f"- {name}: {err}\n"
+                    else:
+                        summary_message += "\n...and more. Check console output for all errors."
+                        break
+                QMessageBox.warning(self, f"{mode.capitalize()} Complete with Errors", summary_message)
+                self.statusBar().showMessage(f"{mode.capitalize()} complete with {len(failed_ops_details)} errors.", 5000)
 
-            self.file_browser_panel.refresh_list()
-            self.organization_worker = None
+        self.file_browser_panel.refresh_list()
+        self.organization_worker = None
 
 
     def _on_worker_error(self, error_message: str):
@@ -426,6 +410,7 @@ class MainWindow(QMainWindow):
                 self.progress_dialog = None
 
             self.organization_config_panel.organize_button.setEnabled(True)
+            self.organization_config_panel.rename_button.setEnabled(True)
             QMessageBox.critical(self, "Organization Error", error_message)
             self.statusBar().showMessage(f"Error: {error_message}", 5000)
             self.organization_worker = None

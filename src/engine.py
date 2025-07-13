@@ -16,99 +16,94 @@ except ImportError:
 
 
 class OrganizationEngine:
-    def __init__(self, settings: OrganizationSettings, source_directory: pathlib.Path):
+    def __init__(self, settings: OrganizationSettings, source_directory: pathlib.Path, mode: str = "organize"):
         self.settings = settings
         self.source_directory = source_directory.resolve()
+        self.mode = mode
 
-
-        if self.settings.target_base_directory:
+        if self.mode == "organize" and self.settings.target_base_directory:
             self.output_base_directory = pathlib.Path(self.settings.target_base_directory).resolve()
         else:
             self.output_base_directory = self.source_directory
 
 
     def process_files_generator(self, files_to_check: List[pathlib.Path]) -> Iterator[Tuple[pathlib.Path, pathlib.Path, str]]:
-            if not self.source_directory.is_dir():
-                yield (self.source_directory, self.source_directory, f"Error: Source '{self.source_directory.name}' is not a directory")
-                return
+        if not self.source_directory.is_dir():
+            yield (self.source_directory, self.source_directory, f"Error: Source '{self.source_directory.name}' is not a directory")
+            return
 
-            for item in files_to_check:
-                if self._matches_filters(item):
-                    try:
-                        relative_target_path_str = self._calculate_target_path_relative(item)
-                        current_proposed_target_abs = (self.output_base_directory / relative_target_path_str).resolve()
+        # Initialize sequence number for rename mode
+        sequence_counter = self.settings.rename_start_number
 
-                        initial_proposed_target_for_status = current_proposed_target_abs
+        for item in files_to_check:
+            if self._matches_filters(item):
+                try:
+                    relative_target_path = self._calculate_target_path_relative(item, sequence_counter)
+                    current_proposed_target_abs = (self.output_base_directory / relative_target_path).resolve()
 
-                        status_message = "To be moved"
+                    initial_proposed_target_for_status = current_proposed_target_abs
 
-                        if item.resolve() == current_proposed_target_abs.resolve():
-                            status_message = f"Already in place: {current_proposed_target_abs.relative_to(self.output_base_directory)}"
-                            yield item, current_proposed_target_abs, status_message
-                            continue
+                    status_message = "To be moved" if self.mode == "organize" else "To be renamed"
 
-                        if current_proposed_target_abs.exists():
-                            if current_proposed_target_abs.is_dir():
-                                status_message = f"Conflict: Target '{initial_proposed_target_for_status.relative_to(self.output_base_directory)}' is an existing directory. Skipped."
-                            elif self.settings.conflict_resolution == "Skip":
-                                status_message = f"Conflict: Target '{initial_proposed_target_for_status.relative_to(self.output_base_directory)}' exists. Skipped."
-                            elif self.settings.conflict_resolution == "Overwrite":
-                                status_message = f"Conflict: Target '{initial_proposed_target_for_status.relative_to(self.output_base_directory)}' exists. To be overwritten."
-                            elif self.settings.conflict_resolution == "Rename with Suffix":
-                                count = 1
-                                original_stem = initial_proposed_target_for_status.stem
-                                original_suffix = initial_proposed_target_for_status.suffix
-
-                                current_proposed_target_abs = initial_proposed_target_for_status.with_name(f"{original_stem}_{count}{original_suffix}")
-                                while current_proposed_target_abs.exists():
-                                    count += 1
-                                    current_proposed_target_abs = initial_proposed_target_for_status.with_name(f"{original_stem}_{count}{original_suffix}")
-
-                                status_message = f"Conflict: Target '{initial_proposed_target_for_status.relative_to(self.output_base_directory)}' exists. To be renamed to '{current_proposed_target_abs.name}'."
-
-                        if not self.settings.dry_run:
-                            if "Skipped" not in status_message and "Error" not in status_message and "Already in place" not in status_message:
-                                try:
-                                    current_proposed_target_abs.parent.mkdir(parents=True, exist_ok=True)
-
-                                       # DEBUG
-
-                                    if "error.zip" in item.name and not self.settings.dry_run:
-                                        status_message = "Error moving: Forced test error"
-                                        yield item, current_proposed_target_abs, status_message
-                                        continue # Skip actual move for this test
-
-                                    shutil.move(str(item), str(current_proposed_target_abs))
-
-                                    if "To be overwritten" in status_message:
-                                        status_message = f"Overwritten: {initial_proposed_target_for_status.relative_to(self.output_base_directory)}"
-                                    elif "To be renamed to" in status_message: # The status already mentions the new name from current_proposed_target_abs.name
-                                        status_message = f"Moved and Renamed to: {current_proposed_target_abs.relative_to(self.output_base_directory)}"
-                                    else:
-                                        status_message = f"Moved to: {current_proposed_target_abs.relative_to(self.output_base_directory)}"
-
-                                except shutil.Error as e_shutil:
-                                    if "are the same file" in str(e_shutil).lower():
-                                        status_message = f"Already in place (shutil err): {current_proposed_target_abs.relative_to(self.output_base_directory)}"
-                                    else:
-                                        status_message = f"Shutil Error moving: {e_shutil}"
-                                except Exception as e_move:
-                                    print(f"Error moving file {item.name} to {current_proposed_target_abs}: {e_move}")
-                                    status_message = f"Error moving: {e_move}"
-
+                    if item.resolve() == current_proposed_target_abs.resolve():
+                        status_message = f"Already in place: {current_proposed_target_abs.relative_to(self.output_base_directory)}"
                         yield item, current_proposed_target_abs, status_message
+                        continue
 
-                    except Exception as e_calc:
-                        print(f"Error calculating/processing for {item.name}: {e_calc}")
-                        current_proposed_target_abs_for_error = item
-                        try:
+                    if current_proposed_target_abs.exists():
+                        if current_proposed_target_abs.is_dir():
+                            status_message = f"Conflict: Target '{initial_proposed_target_for_status.relative_to(self.output_base_directory)}' is an existing directory. Skipped."
+                        elif self.settings.conflict_resolution == "Skip":
+                            status_message = f"Conflict: Target '{initial_proposed_target_for_status.relative_to(self.output_base_directory)}' exists. Skipped."
+                        elif self.settings.conflict_resolution == "Overwrite":
+                            status_message = f"Conflict: Target '{initial_proposed_target_for_status.relative_to(self.output_base_directory)}' exists. To be overwritten."
+                        elif self.settings.conflict_resolution == "Rename with Suffix":
+                            count = 1
+                            original_stem = initial_proposed_target_for_status.stem
+                            original_suffix = initial_proposed_target_for_status.suffix
 
-                            current_proposed_target_abs_for_error = initial_proposed_target_for_status
-                        except NameError:
-                            pass
-                        yield item, current_proposed_target_abs_for_error, f"Error processing: {e_calc}"
-                # else: # File does not match filters (optional: yield a "Skipped: No filter match" status)
-                #    yield item, item, "Skipped: No filter match"
+                            current_proposed_target_abs = initial_proposed_target_for_status.with_name(f"{original_stem}_{count}{original_suffix}")
+                            while current_proposed_target_abs.exists():
+                                count += 1
+                                current_proposed_target_abs = initial_proposed_target_for_status.with_name(f"{original_stem}_{count}{original_suffix}")
+
+                            status_message = f"Conflict: Target '{initial_proposed_target_for_status.relative_to(self.output_base_directory)}' exists. To be renamed to '{current_proposed_target_abs.name}'."
+
+                    if not self.settings.dry_run:
+                        if "Skipped" not in status_message and "Error" not in status_message and "Already in place" not in status_message:
+                            try:
+                                current_proposed_target_abs.parent.mkdir(parents=True, exist_ok=True)
+
+                                shutil.move(str(item), str(current_proposed_target_abs))
+
+                                if "To be overwritten" in status_message:
+                                    status_message = f"Overwritten: {initial_proposed_target_for_status.relative_to(self.output_base_directory)}"
+                                elif "To be renamed to" in status_message:
+                                    status_message = f"Moved and Renamed to: {current_proposed_target_abs.relative_to(self.output_base_directory)}"
+                                else:
+                                    base_verb = "Moved to" if self.mode == "organize" else "Renamed to"
+                                    status_message = f"{base_verb}: {current_proposed_target_abs.relative_to(self.output_base_directory)}"
+
+                            except shutil.Error as e_shutil:
+                                if "are the same file" in str(e_shutil).lower():
+                                    status_message = f"Already in place (shutil err): {current_proposed_target_abs.relative_to(self.output_base_directory)}"
+                                else:
+                                    status_message = f"Shutil Error moving: {e_shutil}"
+                            except Exception as e_move:
+                                print(f"Error moving file {item.name} to {current_proposed_target_abs}: {e_move}")
+                                status_message = f"Error moving: {e_move}"
+
+                    yield item, current_proposed_target_abs, status_message
+                    sequence_counter += 1 # Increment counter for the next valid file
+
+                except Exception as e_calc:
+                    print(f"Error calculating/processing for {item.name}: {e_calc}")
+                    current_proposed_target_abs_for_error = item
+                    try:
+                        current_proposed_target_abs_for_error = initial_proposed_target_for_status
+                    except NameError:
+                        pass
+                    yield item, current_proposed_target_abs_for_error, f"Error processing: {e_calc}"
 
     def _matches_filters(self, file_path: pathlib.Path) -> bool:
             if self.settings.name_filter_text:
@@ -215,11 +210,13 @@ class OrganizationEngine:
         return "Other"
 
 
-    def _calculate_target_path_relative(self, source_file: pathlib.Path) -> pathlib.Path:
-        template = self.settings.structure_template
+    def _calculate_target_path_relative(self, source_file: pathlib.Path, sequence_number: int) -> pathlib.Path:
+        if self.mode == "organize":
+            template = self.settings.structure_template
+        else: # rename
+            template = self.settings.rename_template
 
         stat_info = source_file.stat()
-        # Use st_mtime consistently for template dates as it's used in filters
         time_for_template = datetime.datetime.fromtimestamp(stat_info.st_mtime)
 
         year = str(time_for_template.year)
@@ -233,7 +230,16 @@ class OrganizationEngine:
         path_str = path_str.replace("[MM]", month)
         path_str = path_str.replace("[DD]", day)
         path_str = path_str.replace("[Filename]", filename_stem)
-        path_str = path_str.replace("[Ext]", extension)
+
+        # Handle [Num] placeholder for rename mode
+        if self.mode == "rename":
+            num_str = str(sequence_number).zfill(self.settings.rename_template_padding)
+            path_str = path_str.replace("[Num]", num_str)
+
+        # Only add extension if it's in the template (organize mode)
+        # For rename mode, we add it manually later.
+        if "[Ext]" in path_str:
+            path_str = path_str.replace("[Ext]", extension)
 
         # Handle [DetectedFileType]
         if "[DetectedFileType]" in path_str:
@@ -241,18 +247,23 @@ class OrganizationEngine:
             path_str = path_str.replace("[DetectedFileType]", detected_type_category)
 
         # Regex Group replacement
-        # ... (this part remains the same) ...
         if "[RegexGroup" in path_str and self.settings.name_filter_type == "Regex" and self.settings.name_filter_text:
             try:
                 match = re.search(self.settings.name_filter_text, source_file.name)
                 if match:
-                    groups = match.groups() # Returns a tuple of all subgroups
+                    groups = match.groups()
                     for i, group_val in enumerate(groups):
-                        if group_val is not None: # Only replace if group captured something
-                             path_str = path_str.replace(f"[RegexGroup{i+1}]", group_val)
-                        else: # If group didn't capture, remove the placeholder or replace with empty
-                             path_str = path_str.replace(f"[RegexGroup{i+1}]", "")
+                        if group_val is not None:
+                            path_str = path_str.replace(f"[RegexGroup{i+1}]", group_val)
+                        else:
+                            path_str = path_str.replace(f"[RegexGroup{i+1}]", "")
             except re.error: pass
 
-
-        return pathlib.Path(path_str)
+        # Final assembly
+        if self.mode == "rename":
+            # For rename, the path is just the new filename, extension is added back
+            final_path = pathlib.Path(f"{path_str}{source_file.suffix}")
+            # The parent is the original file's parent, so it stays in the same directory
+            return source_file.parent.relative_to(self.output_base_directory) / final_path
+        else: # organize
+            return pathlib.Path(path_str)
