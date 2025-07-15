@@ -412,6 +412,10 @@ class MetadataPanel(QWidget):
         self.created_value = QLabel()
         self.modified_label = QLabel("Modified:")
         self.modified_value = QLabel()
+        self.source_label = QLabel("Source:")
+        self.source_value = QLabel()
+        self.permissions_label = QLabel("Permissions:")
+        self.permissions_value = QLabel()
 
         # Add widgets to the grid layout
         self.layout.addWidget(self.name_label, 0, 0)
@@ -424,9 +428,13 @@ class MetadataPanel(QWidget):
         self.layout.addWidget(self.created_value, 3, 1)
         self.layout.addWidget(self.modified_label, 4, 0)
         self.layout.addWidget(self.modified_value, 4, 1)
+        self.layout.addWidget(self.source_label, 5, 0)
+        self.layout.addWidget(self.source_value, 5, 1)
+        self.layout.addWidget(self.permissions_label, 6, 0)
+        self.layout.addWidget(self.permissions_value, 6, 1)
 
         # Add a spacer to push content to the top if there's extra space
-        self.layout.addItem(QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding), 5, 0, 1, 2)
+        self.layout.addItem(QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding), 7, 0, 1, 2)
         self.layout.setColumnStretch(1, 1) # Allow the value column to expand
 
         self.clear_display() # Initialize with empty values
@@ -437,6 +445,8 @@ class MetadataPanel(QWidget):
         self.size_value.setText("-")
         self.created_value.setText("-")
         self.modified_value.setText("-")
+        self.source_value.setText("-")
+        self.permissions_value.setText("-")
 
     def _format_size(self, num_bytes):
         if num_bytes is None: return "-"
@@ -480,6 +490,12 @@ class MetadataPanel(QWidget):
                                                                                 # For more reliable creation time, OS-specific APIs might be needed
             self.modified_value.setText(self._format_timestamp(stat_info.st_mtime))
 
+            # Source/Origin
+            self.source_value.setText(self._get_file_source(path_obj))
+
+            # Permissions
+            self.permissions_value.setText(self._format_permissions(stat_info.st_mode))
+
         except OSError as e:
             print(f"Error reading metadata for {path_obj}: {e}")
             self.clear_display()
@@ -488,6 +504,112 @@ class MetadataPanel(QWidget):
             print(f"Unexpected error reading metadata for {path_obj}: {e}")
             self.clear_display()
             self.name_value.setText("Error reading metadata")
+
+    def _get_file_source(self, path_obj: pathlib.Path) -> str:
+        """Determine the source/origin of a file."""
+        try:
+            # For images, try to get EXIF data
+            if path_obj.suffix.lower() in ['.jpg', '.jpeg', '.tiff', '.tif']:
+                try:
+                    from PIL import Image
+                    from PIL.ExifTags import TAGS
+
+                    with Image.open(path_obj) as img:
+                        exif_data = img._getexif()
+                        if exif_data:
+                            for tag_id, value in exif_data.items():
+                                tag = TAGS.get(tag_id, tag_id)
+                                if tag == "Software":
+                                    return f"Software: {value}"
+                                elif tag == "Make":
+                                    model = exif_data.get(272, "")  # Model tag
+                                    if model:
+                                        return f"Camera: {value} {model}"
+                                    return f"Camera: {value}"
+                except (ImportError, Exception):
+                    pass
+
+            # For documents, try to get application info
+            elif path_obj.suffix.lower() in ['.pdf']:
+                try:
+                    import PyPDF2
+                    with open(path_obj, 'rb') as file:
+                        pdf_reader = PyPDF2.PdfReader(file)
+                        if pdf_reader.metadata:
+                            creator = pdf_reader.metadata.get('/Creator', '')
+                            producer = pdf_reader.metadata.get('/Producer', '')
+                            if creator:
+                                return f"Created by: {creator}"
+                            elif producer:
+                                return f"Produced by: {producer}"
+                except (ImportError, Exception):
+                    pass
+
+            # For Office documents
+            elif path_obj.suffix.lower() in ['.docx', '.xlsx', '.pptx']:
+                try:
+                    import zipfile
+                    with zipfile.ZipFile(path_obj, 'r') as zip_file:
+                        if 'docProps/app.xml' in zip_file.namelist():
+                            app_xml = zip_file.read('docProps/app.xml').decode('utf-8')
+                            if 'Microsoft' in app_xml:
+                                return "Microsoft Office"
+                            elif 'LibreOffice' in app_xml:
+                                return "LibreOffice"
+                except (ImportError, Exception):
+                    pass
+
+            # Fallback: try to get file association
+            mime_type, _ = mimetypes.guess_type(path_obj)
+            if mime_type:
+                # Simple mapping of common MIME types to applications
+                app_mapping = {
+                    'text/plain': 'Text Editor',
+                    'image/jpeg': 'Image Editor/Camera',
+                    'image/png': 'Image Editor/Screenshot',
+                    'application/pdf': 'PDF Viewer/Creator',
+                    'video/mp4': 'Video Editor/Camera',
+                    'audio/mpeg': 'Audio Editor/Player',
+                }
+                return app_mapping.get(mime_type, 'Unknown')
+
+            return "Unknown"
+
+        except Exception:
+            return "Unknown"
+
+    def _format_permissions(self, mode: int) -> str:
+        """Format file permissions in a human-readable way."""
+        import stat
+
+        # Get permission bits
+        permissions = []
+
+        # Owner permissions
+        owner_perms = ""
+        owner_perms += "r" if mode & stat.S_IRUSR else "-"
+        owner_perms += "w" if mode & stat.S_IWUSR else "-"
+        owner_perms += "x" if mode & stat.S_IXUSR else "-"
+        permissions.append(f"Owner: {owner_perms}")
+
+        # Group permissions
+        group_perms = ""
+        group_perms += "r" if mode & stat.S_IRGRP else "-"
+        group_perms += "w" if mode & stat.S_IWGRP else "-"
+        group_perms += "x" if mode & stat.S_IXGRP else "-"
+        permissions.append(f"Group: {group_perms}")
+
+        # Other permissions
+        other_perms = ""
+        other_perms += "r" if mode & stat.S_IROTH else "-"
+        other_perms += "w" if mode & stat.S_IWOTH else "-"
+        other_perms += "x" if mode & stat.S_IXOTH else "-"
+        permissions.append(f"Other: {other_perms}")
+
+        # Also show octal representation
+        octal = oct(mode)[-3:]
+
+        return f"{', '.join(permissions)} ({octal})"
 
 
 class PreviewPanel(QWidget):
