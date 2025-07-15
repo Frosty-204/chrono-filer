@@ -34,6 +34,7 @@ class OrganizationSettings:
     conflict_resolution: str = "Skip"  # "Overwrite", "Rename with Suffix"
     dry_run: bool = True
     process_recursively: bool = False
+    operation_type: str = "Move"  # "Move", "Copy"
 
     # Organize-specific settings
     structure_template: str = "[YYYY]/[MM]/[Filename].[Ext]"
@@ -532,10 +533,12 @@ class OrganizationConfigPanel(QWidget):
         self.rename_template_info_button.clicked.connect(self._show_template_info) # Reuse same info dialog
 
         self.browse_target_button.clicked.connect(self._on_browse_target_directory)
+        self.operation_type_combo.currentTextChanged.connect(self._on_operation_type_changed)
 
         # Initial state for template edits
         self._on_structure_preset_changed(self.structure_preset_combo.currentText())
         self._on_rename_preset_changed(self.rename_preset_combo.currentText())
+        self._on_operation_type_changed(self.operation_type_combo.currentText())
 
 
     def _create_organize_tab(self, tab_widget):
@@ -580,20 +583,36 @@ class OrganizationConfigPanel(QWidget):
 
         # --- Actions Group ---
         actions_group = QGroupBox("Actions")
-        actions_layout = QHBoxLayout(actions_group)
+        actions_layout = QVBoxLayout(actions_group)
 
+        # First row: Operation type and conflict resolution
+        first_row_layout = QHBoxLayout()
+
+        self.operation_type_combo = QComboBox()
+        self.operation_type_combo.addItems(["Move", "Copy"])
+        self.operation_type_combo.setToolTip("Move: Files are moved to new location\nCopy: Files are copied, originals remain")
+        first_row_layout.addWidget(QLabel("Operation:"))
+        first_row_layout.addWidget(self.operation_type_combo)
+
+        first_row_layout.addWidget(QLabel("Conflicts:"))
         self.conflict_resolution_combo = QComboBox()
         self.conflict_resolution_combo.addItems(["Skip", "Overwrite", "Rename with Suffix"])
-        actions_layout.addWidget(QLabel("Filename Conflicts:"))
-        actions_layout.addWidget(self.conflict_resolution_combo)
-        actions_layout.addStretch()
+        first_row_layout.addWidget(self.conflict_resolution_combo)
+        first_row_layout.addStretch()
 
+        actions_layout.addLayout(first_row_layout)
+
+        # Second row: Dry run and organize button
+        second_row_layout = QHBoxLayout()
         self.dry_run_checkbox = QCheckBox("Dry Run (Preview Changes)")
         self.dry_run_checkbox.setChecked(True)
-        actions_layout.addWidget(self.dry_run_checkbox)
+        second_row_layout.addWidget(self.dry_run_checkbox)
+        second_row_layout.addStretch()
 
         self.organize_button = QPushButton("Organize Files")
-        actions_layout.addWidget(self.organize_button)
+        second_row_layout.addWidget(self.organize_button)
+
+        actions_layout.addLayout(second_row_layout)
         tab_layout.addWidget(actions_group)
 
         tab_layout.addStretch(1) # Pushes content to the top
@@ -710,6 +729,13 @@ class OrganizationConfigPanel(QWidget):
         """
         QMessageBox.information(self, "Structure Template Info", info_text)
 
+    def _on_operation_type_changed(self, operation_type: str):
+        """Updates the organize button text based on the selected operation type."""
+        if operation_type == "Copy":
+            self.organize_button.setText("Copy Files")
+        else:
+            self.organize_button.setText("Move Files")
+
     def _on_organize_clicked(self):
         settings = self.get_current_settings()
         self.organize_triggered.emit(settings)
@@ -736,6 +762,7 @@ class OrganizationConfigPanel(QWidget):
         if current_tab_text == "Organize":
             conflict = self.conflict_resolution_combo.currentText()
             dry_run = self.dry_run_checkbox.isChecked()
+            operation_type = self.operation_type_combo.currentText()
             structure = self.structure_template_edit.text().strip()
             target_base_dir_str = self.target_base_dir_edit.text().strip()
             target_base = str(pathlib.Path(target_base_dir_str).expanduser().resolve()) if target_base_dir_str else None
@@ -745,6 +772,7 @@ class OrganizationConfigPanel(QWidget):
         else: # Rename
             conflict = self.rename_conflict_resolution_combo.currentText()
             dry_run = self.rename_dry_run_checkbox.isChecked()
+            operation_type = "Move"  # Rename mode always moves files
             structure = "" # Not relevant for rename mode
             target_base = None
             rename_template = self.rename_template_edit.text().strip()
@@ -760,6 +788,7 @@ class OrganizationConfigPanel(QWidget):
             size_min_kb=size_min,
             size_max_kb=actual_size_max,
             process_recursively=process_recursively,
+            operation_type=operation_type,
             conflict_resolution=conflict,
             dry_run=dry_run,
             structure_template=structure,
@@ -785,6 +814,7 @@ class OrganizationConfigPanel(QWidget):
             # Organize Tab
             "structure_preset_name": self.structure_preset_combo.currentText(),
             "structure_template_text": self.structure_template_edit.text(),
+            "operation_type_index": self.operation_type_combo.currentIndex(),
             "conflict_resolution_index": self.conflict_resolution_combo.currentIndex(),
             "dry_run_checked": self.dry_run_checkbox.isChecked(),
             "target_base_directory": self.target_base_dir_edit.text(),
@@ -816,6 +846,7 @@ class OrganizationConfigPanel(QWidget):
         # Organize Tab
         self.structure_preset_combo.setCurrentText(state.get("structure_preset_name", "Custom"))
         self.structure_template_edit.setText(state.get("structure_template_text", ""))
+        self.operation_type_combo.setCurrentIndex(state.get("operation_type_index", 0))
         self.conflict_resolution_combo.setCurrentIndex(state.get("conflict_resolution_index", 0))
         self.dry_run_checkbox.setChecked(state.get("dry_run_checked", True))
         self.target_base_dir_edit.setText(state.get("target_base_directory", ""))

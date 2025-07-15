@@ -17,7 +17,7 @@ class BatchMoveCommand(Command):
     def __init__(self, operations: List[Tuple[pathlib.Path, pathlib.Path]]):
         # operations is a list of (source_path, destination_path) tuples
         self.operations = operations
-        self.description = f"Organized {len(operations)} file(s)"
+        self.description = f"Moved {len(operations)} file(s)"
 
     def execute(self):
         """
@@ -27,26 +27,70 @@ class BatchMoveCommand(Command):
         so its main purpose is to hold the data needed for the undo.
         The `execute` method here is more for the "redo" functionality.
         """
-        print(f"Executing/Redoing: {self.description}")
+
         for src, dest in self.operations:
             # For a "redo", the file is back at the original source.
             # We need to ensure the destination parent directory exists.
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(src), str(dest))
-        print("Execution/Redo complete.")
+
 
     def undo(self):
         """
         Undoes the batch move by moving files from their destination back to their original source.
         This is done in reverse order to handle directory creations/deletions properly.
         """
-        print(f"Undoing: {self.description}")
+
         for src, dest in reversed(self.operations):
             # For an "undo", the file is at the destination. We move it back to the source.
             # Ensure the original source parent directory exists.
             src.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(dest), str(src))
-        print("Undo complete.")
+
+
+class BatchCopyCommand(Command):
+    """Represents a batch of file copy operations."""
+    def __init__(self, operations: List[Tuple[pathlib.Path, pathlib.Path]]):
+        # operations is a list of (source_path, destination_path) tuples
+        self.operations = operations
+        self.description = f"Copied {len(operations)} file(s)"
+
+    def execute(self):
+        """
+        Executes the batch copy.
+        Note: In our current design, the copy has already happened in the engine.
+        This command object will be created *after* the successful operation,
+        so its main purpose is to hold the data needed for the undo.
+        The `execute` method here is more for the "redo" functionality.
+        """
+        for src, dest in self.operations:
+            # For a "redo", we need to copy the file again from source to destination.
+            # We need to ensure the destination parent directory exists.
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            # Only copy if the source still exists and destination doesn't exist
+            if src.exists() and not dest.exists():
+                shutil.copy2(str(src), str(dest))
+
+    def undo(self):
+        """
+        Undoes the batch copy by deleting the copied files.
+        This is done in reverse order to handle directory cleanup properly.
+        """
+        for src, dest in reversed(self.operations):
+            # For an "undo", we need to delete the copied file at the destination.
+            try:
+                if dest.exists():
+                    dest.unlink()
+                # Try to clean up empty directories
+                try:
+                    parent = dest.parent
+                    # Only remove if it's empty and not the root directory
+                    if parent != parent.parent and not any(parent.iterdir()):
+                        parent.rmdir()
+                except OSError:
+                    pass  # Directory not empty or can't be removed, that's fine
+            except Exception as e:
+                print(f"Error deleting copied file {dest}: {e}")
 
 class UndoManager(QObject):
     """Manages the undo and redo stacks and emits signals when their state changes."""

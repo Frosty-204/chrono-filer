@@ -26,7 +26,7 @@ DryRunResultsDialog
 from engine import OrganizationEngine
 from worker import OrganizationWorker
 from settings_manager import SettingsManager
-from commands import UndoManager, BatchMoveCommand
+from commands import UndoManager, BatchMoveCommand, BatchCopyCommand
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -355,12 +355,21 @@ class MainWindow(QMainWindow):
             for result_item in results:
                 if len(result_item) == 3:
                     source_path, target_path, status_msg = result_item
-                    if status_msg and (status_msg.startswith("Moved") or status_msg.startswith("Overwritten") or status_msg.startswith("Renamed")):
+                    if status_msg and (status_msg.startswith("Moved") or status_msg.startswith("Copied") or status_msg.startswith("Overwritten") or status_msg.startswith("Renamed")):
                         successful_moves.append((source_path, target_path))
 
             if successful_moves:
-                command = BatchMoveCommand(successful_moves)
-                command.description = f"{mode.capitalize()}d {len(successful_moves)} file(s)"
+                # Create appropriate command based on operation type
+                operation_type = getattr(self.organization_worker.settings, 'operation_type', 'Move')
+                if operation_type == "Copy":
+                    command = BatchCopyCommand(successful_moves)
+                    command.description = f"Copied {len(successful_moves)} file(s)"
+                else:
+                    command = BatchMoveCommand(successful_moves)
+                    if mode == "organize":
+                        command.description = f"Moved {len(successful_moves)} file(s)"
+                    else:
+                        command.description = f"Renamed {len(successful_moves)} file(s)"
                 self.undo_manager.add_command(command)
 
         if was_cancelled:
@@ -380,14 +389,29 @@ class MainWindow(QMainWindow):
                 else:
                     failed_ops_details.append(("Unknown item", "Malformed result from worker"))
 
+            # Get operation type for better status messages
+            operation_type = getattr(self.organization_worker.settings, 'operation_type', 'Move')
+            if operation_type == "Copy":
+                operation_verb = "copied"
+            else:
+                operation_verb = "moved"
+
             if not failed_ops_details:
-                QMessageBox.information(self, f"{mode.capitalize()} Complete",
-                                        f"{successful_ops} file operations completed successfully.")
+                if mode == "organize":
+                    message = f"{successful_ops} files {operation_verb} successfully."
+                else:
+                    message = f"{successful_ops} files renamed successfully."
+                QMessageBox.information(self, f"{mode.capitalize()} Complete", message)
                 self.statusBar().showMessage(f"{mode.capitalize()} complete.", 5000)
             else:
+                if mode == "organize":
+                    operation_desc = operation_verb
+                else:
+                    operation_desc = "renamed"
+
                 summary_message = (
                     f"{mode.capitalize()} finished with errors.\n\n"
-                    f"Successfully processed: {successful_ops} item(s).\n"
+                    f"Successfully {operation_desc}: {successful_ops} item(s).\n"
                     f"Failed to process: {len(failed_ops_details)} item(s).\n\n"
                     "First few errors:\n"
                 )

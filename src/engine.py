@@ -43,7 +43,11 @@ class OrganizationEngine:
 
                     initial_proposed_target_for_status = current_proposed_target_abs
 
-                    status_message = "To be moved" if self.mode == "organize" else "To be renamed"
+                    if self.mode == "organize":
+                        operation_type = getattr(self.settings, 'operation_type', 'Move')
+                        status_message = "To be copied" if operation_type == "Copy" else "To be moved"
+                    else:
+                        status_message = "To be renamed"
 
                     if item.resolve() == current_proposed_target_abs.resolve():
                         status_message = f"Already in place: {current_proposed_target_abs.relative_to(self.output_base_directory)}"
@@ -56,7 +60,9 @@ class OrganizationEngine:
                         elif self.settings.conflict_resolution == "Skip":
                             status_message = f"Conflict: Target '{initial_proposed_target_for_status.relative_to(self.output_base_directory)}' exists. Skipped."
                         elif self.settings.conflict_resolution == "Overwrite":
-                            status_message = f"Conflict: Target '{initial_proposed_target_for_status.relative_to(self.output_base_directory)}' exists. To be overwritten."
+                            operation_type = getattr(self.settings, 'operation_type', 'Move')
+                            operation_verb = "copied over" if operation_type == "Copy" else "overwritten"
+                            status_message = f"Conflict: Target '{initial_proposed_target_for_status.relative_to(self.output_base_directory)}' exists. To be {operation_verb}."
                         elif self.settings.conflict_resolution == "Rename with Suffix":
                             count = 1
                             original_stem = initial_proposed_target_for_status.stem
@@ -74,14 +80,21 @@ class OrganizationEngine:
                             try:
                                 current_proposed_target_abs.parent.mkdir(parents=True, exist_ok=True)
 
-                                shutil.move(str(item), str(current_proposed_target_abs))
+                                # Choose operation based on settings
+                                operation_type = getattr(self.settings, 'operation_type', 'Move')
+                                if operation_type == "Copy":
+                                    shutil.copy2(str(item), str(current_proposed_target_abs))
+                                    operation_verb = "Copied"
+                                else:  # Move (default)
+                                    shutil.move(str(item), str(current_proposed_target_abs))
+                                    operation_verb = "Moved" if self.mode == "organize" else "Renamed"
 
                                 if "To be overwritten" in status_message:
                                     status_message = f"Overwritten: {initial_proposed_target_for_status.relative_to(self.output_base_directory)}"
                                 elif "To be renamed to" in status_message:
-                                    status_message = f"Moved and Renamed to: {current_proposed_target_abs.relative_to(self.output_base_directory)}"
+                                    status_message = f"{operation_verb} and Renamed to: {current_proposed_target_abs.relative_to(self.output_base_directory)}"
                                 else:
-                                    base_verb = "Moved to" if self.mode == "organize" else "Renamed to"
+                                    base_verb = f"{operation_verb} to" if self.mode == "organize" else f"{operation_verb} to"
                                     status_message = f"{base_verb}: {current_proposed_target_abs.relative_to(self.output_base_directory)}"
 
                             except shutil.Error as e_shutil:
