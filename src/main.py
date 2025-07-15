@@ -26,7 +26,7 @@ DryRunResultsDialog
 from engine import OrganizationEngine
 from worker import OrganizationWorker
 from settings_manager import SettingsManager
-from commands import UndoManager, BatchMoveCommand, BatchCopyCommand
+from commands import UndoManager, BatchMoveCommand, BatchCopyCommand, CreateFolderCommand, RenameCommand, DeleteCommand
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -99,7 +99,7 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     def _create_panels(self):
-        self.file_browser_panel = FileBrowserPanel()
+        self.file_browser_panel = FileBrowserPanel(undo_manager=self.undo_manager)
         self.preview_panel = PreviewPanel()
         self.metadata_panel = MetadataPanel()
         # self.organization_config_panel = OrganizationConfigPanel()
@@ -110,6 +110,9 @@ class MainWindow(QMainWindow):
         # File Browser -> Metadata & Preview
         self.file_browser_panel.selection_changed.connect(self.metadata_panel.update_metadata)
         self.file_browser_panel.selection_changed.connect(self.preview_panel.update_preview)
+
+        # File Browser -> Status Bar
+        self.file_browser_panel.status_message.connect(self.show_status_message)
 
         # Connect signals for both organization and rename
         self.organization_config_panel.organize_triggered.connect(self.on_start_organization)
@@ -218,6 +221,10 @@ class MainWindow(QMainWindow):
 
     def _create_status_bar(self):
         self.statusBar().showMessage("Ready")
+
+    def show_status_message(self, message: str):
+        """Show a status message in the status bar."""
+        self.statusBar().showMessage(message, 3000)
 
     def _create_main_layout(self):
         # --- Bottom Right Tab Widget ---

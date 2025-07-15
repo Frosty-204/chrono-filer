@@ -92,6 +92,74 @@ class BatchCopyCommand(Command):
             except Exception as e:
                 print(f"Error deleting copied file {dest}: {e}")
 
+class CreateFolderCommand(Command):
+    """Represents a folder creation operation."""
+    def __init__(self, folder_path: pathlib.Path):
+        self.folder_path = folder_path
+        self.description = f"Created folder '{folder_path.name}'"
+
+    def execute(self):
+        """Creates the folder."""
+        self.folder_path.mkdir(parents=True, exist_ok=True)
+
+    def undo(self):
+        """Removes the created folder if it's empty."""
+        try:
+            if self.folder_path.exists() and self.folder_path.is_dir():
+                self.folder_path.rmdir()  # Only removes if empty
+        except OSError:
+            pass  # Folder not empty or can't be removed
+
+class RenameCommand(Command):
+    """Represents a file/folder rename operation."""
+    def __init__(self, old_path: pathlib.Path, new_path: pathlib.Path):
+        self.old_path = old_path
+        self.new_path = new_path
+        self.description = f"Renamed '{old_path.name}' to '{new_path.name}'"
+
+    def execute(self):
+        """Renames from old_path to new_path."""
+        self.old_path.rename(self.new_path)
+
+    def undo(self):
+        """Renames back from new_path to old_path."""
+        if self.new_path.exists():
+            self.new_path.rename(self.old_path)
+
+class DeleteCommand(Command):
+    """Represents a file/folder deletion operation."""
+    def __init__(self, item_path: pathlib.Path):
+        self.item_path = item_path
+        self.was_directory = item_path.is_dir()
+        self.description = f"Deleted '{item_path.name}'"
+
+        # For undo, we'll need to store the item's content
+        # This is a simplified version - full implementation would need to backup the content
+        self.backup_content = None
+        if not self.was_directory:
+            try:
+                self.backup_content = item_path.read_bytes()
+            except Exception:
+                pass
+
+    def execute(self):
+        """Deletes the file or directory."""
+        if self.item_path.exists():
+            if self.was_directory:
+                shutil.rmtree(self.item_path)
+            else:
+                self.item_path.unlink()
+
+    def undo(self):
+        """Attempts to restore the deleted item."""
+        if not self.item_path.exists():
+            if self.was_directory:
+                self.item_path.mkdir(parents=True, exist_ok=True)
+            else:
+                if self.backup_content is not None:
+                    self.item_path.parent.mkdir(parents=True, exist_ok=True)
+                    self.item_path.write_bytes(self.backup_content)
+
 class UndoManager(QObject):
     """Manages the undo and redo stacks and emits signals when their state changes."""
     # Signal to enable/disable Undo/Redo actions in the UI

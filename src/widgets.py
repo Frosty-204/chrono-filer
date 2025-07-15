@@ -14,10 +14,10 @@ from PySide6.QtWidgets import (
     QGroupBox, QFormLayout, QComboBox, QDateEdit,
     QSpinBox, QCheckBox, QScrollArea, QDialog,
     QTableWidget, QTableWidgetItem, QAbstractItemView, QMessageBox,
-    QFileDialog, QTabWidget
+    QFileDialog, QTabWidget, QMenu, QInputDialog
 
 )
-from PySide6.QtGui import QPalette, QColor, QPixmap
+from PySide6.QtGui import QPalette, QColor, QPixmap, QKeySequence, QShortcut
 
 from PySide6.QtCore import Qt, Signal, QDate
 
@@ -63,13 +63,15 @@ class PlaceholderWidget(QWidget):
 # --- New FileBrowserPanel Implementation ---
 class FileBrowserPanel(QWidget):
 
-    # Define the custom signal
+    # Define the custom signals
     # It will emit a pathlib.Path object, or None if no valid item is selected
     selection_changed = Signal(object) # Use 'object' to allow sending pathlib.Path or None
+    status_message = Signal(str) # Signal to send status messages to main window
 
-    def __init__(self, parent=None):
+    def __init__(self, undo_manager=None, parent=None):
         super().__init__(parent)
         self.current_path = str(pathlib.Path.home()) # Start in user's home directory
+        self.undo_manager = undo_manager
 
         self.layout = QVBoxLayout(self)
 
@@ -86,8 +88,28 @@ class FileBrowserPanel(QWidget):
         nav_bar_layout.addWidget(self.path_edit)
         self.layout.addLayout(nav_bar_layout)
 
+        # Toolbar with file operations
+        toolbar_layout = QHBoxLayout()
+
+        self.create_folder_button = QPushButton("New Folder")
+        self.create_folder_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder))
+        self.create_folder_button.setToolTip("Create new folder")
+        self.create_folder_button.clicked.connect(self.create_folder)
+
+        self.refresh_button = QPushButton("Refresh")
+        self.refresh_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload))
+        self.refresh_button.setToolTip("Refresh file list")
+        self.refresh_button.clicked.connect(self.refresh_list)
+
+        toolbar_layout.addWidget(self.create_folder_button)
+        toolbar_layout.addWidget(self.refresh_button)
+        toolbar_layout.addStretch()  # Push buttons to the left
+
+        self.layout.addLayout(toolbar_layout)
+
         # File and directory list
         self.item_list_widget = QListWidget()
+        self.item_list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.layout.addWidget(self.item_list_widget)
 
         self.setLayout(self.layout)
@@ -98,6 +120,10 @@ class FileBrowserPanel(QWidget):
         # self.item_list_widget.itemDoubleClicked.connect(self.item_double_clicked)
         self.item_list_widget.itemActivated.connect(self.item_double_clicked)
         self.item_list_widget.currentItemChanged.connect(self.on_current_item_changed)
+        self.item_list_widget.customContextMenuRequested.connect(self.show_context_menu)
+
+        # Setup keyboard shortcuts
+        self._setup_shortcuts()
 
         self.refresh_list()
 
@@ -191,6 +217,181 @@ class FileBrowserPanel(QWidget):
             self.current_path = str(path_obj.resolve())
             self.refresh_list()
         # Later, you could add handling for opening files here
+
+    def show_context_menu(self, position):
+        """Show context menu for file operations."""
+        item = self.item_list_widget.itemAt(position)
+        menu = QMenu(self)
+
+        # Always available actions
+        create_folder_action = menu.addAction("Create Folder")
+        create_folder_action.triggered.connect(self.create_folder)
+
+        if item:
+            path_obj = item.data(Qt.ItemDataRole.UserRole)
+            if path_obj and path_obj.exists():
+                menu.addSeparator()
+
+                # Rename action
+                rename_action = menu.addAction("Rename")
+                rename_action.triggered.connect(lambda: self.rename_item(path_obj))
+
+                # Delete action
+                delete_action = menu.addAction("Delete")
+                delete_action.triggered.connect(lambda: self.delete_item(path_obj))
+
+                # Copy/Move actions (placeholder for now)
+                menu.addSeparator()
+                copy_action = menu.addAction("Copy")
+                copy_action.triggered.connect(lambda: self.copy_item(path_obj))
+
+                move_action = menu.addAction("Move")
+                move_action.triggered.connect(lambda: self.move_item(path_obj))
+
+        menu.exec(self.item_list_widget.mapToGlobal(position))
+
+    def create_folder(self):
+        """Create a new folder in the current directory."""
+        folder_name, ok = QInputDialog.getText(self, "Create Folder", "Folder name:")
+        if ok and folder_name.strip():
+            folder_name = folder_name.strip()
+            new_folder_path = pathlib.Path(self.current_path) / folder_name
+            try:
+                new_folder_path.mkdir(exist_ok=False)
+                self.refresh_list()
+
+                # Add to undo manager if available
+                if self.undo_manager:
+                    from commands import CreateFolderCommand
+                    command = CreateFolderCommand(new_folder_path)
+                    self.undo_manager.add_command(command)
+
+                self.status_message.emit(f"Folder '{folder_name}' created successfully.")
+                QMessageBox.information(self, "Success", f"Folder '{folder_name}' created successfully.")
+            except FileExistsError:
+                QMessageBox.warning(self, "Error", f"Folder '{folder_name}' already exists.")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to create folder: {e}")
+
+    def rename_item(self, path_obj: pathlib.Path):
+        """Rename a file or directory."""
+        old_name = path_obj.name
+        new_name, ok = QInputDialog.getText(self, "Rename", f"New name for '{old_name}':", text=old_name)
+        if ok and new_name.strip() and new_name.strip() != old_name:
+            new_name = new_name.strip()
+            new_path = path_obj.parent / new_name
+            try:
+                old_path = path_obj
+                path_obj.rename(new_path)
+                self.refresh_list()
+
+                # Add to undo manager if available
+                if self.undo_manager:
+                    from commands import RenameCommand
+                    command = RenameCommand(old_path, new_path)
+                    self.undo_manager.add_command(command)
+
+                self.status_message.emit(f"'{old_name}' renamed to '{new_name}'.")
+                QMessageBox.information(self, "Success", f"'{old_name}' renamed to '{new_name}'.")
+            except FileExistsError:
+                QMessageBox.warning(self, "Error", f"'{new_name}' already exists.")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to rename: {e}")
+
+    def delete_item(self, path_obj: pathlib.Path):
+        """Delete a file or directory."""
+        item_type = "folder" if path_obj.is_dir() else "file"
+        reply = QMessageBox.question(
+            self, "Confirm Delete",
+            f"Are you sure you want to delete the {item_type} '{path_obj.name}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                # Create command before deletion for undo support
+                if self.undo_manager:
+                    from commands import DeleteCommand
+                    command = DeleteCommand(path_obj)
+
+                if path_obj.is_dir():
+                    # For directories, check if empty
+                    if any(path_obj.iterdir()):
+                        reply = QMessageBox.question(
+                            self, "Confirm Delete",
+                            f"The folder '{path_obj.name}' is not empty. Delete it and all its contents?",
+                            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                            QMessageBox.StandardButton.No
+                        )
+                        if reply == QMessageBox.StandardButton.Yes:
+                            import shutil
+                            shutil.rmtree(path_obj)
+                        else:
+                            return
+                    else:
+                        path_obj.rmdir()
+                else:
+                    path_obj.unlink()
+
+                self.refresh_list()
+
+                # Add to undo manager if available
+                if self.undo_manager:
+                    self.undo_manager.add_command(command)
+
+                self.status_message.emit(f"'{path_obj.name}' deleted successfully.")
+                QMessageBox.information(self, "Success", f"'{path_obj.name}' deleted successfully.")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to delete: {e}")
+
+    def copy_item(self, path_obj: pathlib.Path):
+        """Copy a file or directory (placeholder for now)."""
+        QMessageBox.information(self, "Feature Coming Soon",
+                               f"Copy operation for '{path_obj.name}' will be implemented in the next update.")
+
+    def move_item(self, path_obj: pathlib.Path):
+        """Move a file or directory (placeholder for now)."""
+        QMessageBox.information(self, "Feature Coming Soon",
+                               f"Move operation for '{path_obj.name}' will be implemented in the next update.")
+
+    def _setup_shortcuts(self):
+        """Setup keyboard shortcuts for file operations."""
+        # Create new folder - Ctrl+Shift+N
+        new_folder_shortcut = QShortcut(QKeySequence("Ctrl+Shift+N"), self)
+        new_folder_shortcut.activated.connect(self.create_folder)
+
+        # Refresh - F5
+        refresh_shortcut = QShortcut(QKeySequence("F5"), self)
+        refresh_shortcut.activated.connect(self.refresh_list)
+
+        # Delete - Delete key
+        delete_shortcut = QShortcut(QKeySequence("Delete"), self)
+        delete_shortcut.activated.connect(self._delete_selected_item)
+
+        # Rename - F2
+        rename_shortcut = QShortcut(QKeySequence("F2"), self)
+        rename_shortcut.activated.connect(self._rename_selected_item)
+
+        # Go up - Alt+Up
+        go_up_shortcut = QShortcut(QKeySequence("Alt+Up"), self)
+        go_up_shortcut.activated.connect(self.go_up)
+
+    def _delete_selected_item(self):
+        """Delete the currently selected item."""
+        current_item = self.item_list_widget.currentItem()
+        if current_item:
+            path_obj = current_item.data(Qt.ItemDataRole.UserRole)
+            if path_obj and path_obj.exists():
+                self.delete_item(path_obj)
+
+    def _rename_selected_item(self):
+        """Rename the currently selected item."""
+        current_item = self.item_list_widget.currentItem()
+        if current_item:
+            path_obj = current_item.data(Qt.ItemDataRole.UserRole)
+            if path_obj and path_obj.exists():
+                self.rename_item(path_obj)
 
 # The other placeholder classes remain unchanged for now
 # ... (FileBrowserPanel class above) ...
