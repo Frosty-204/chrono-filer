@@ -626,18 +626,91 @@ class PreviewPanel(QWidget):
         self.no_preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.stacked_widget.addWidget(self.no_preview_label)
 
-        # Page 1: Image Preview
-        self.image_scroll_area = QScrollArea(self) # For large images
-        self.image_scroll_area.setWidgetResizable(True)
+        # Page 1: Image Preview with controls
+        self.image_widget = QWidget()
+        self.image_layout = QVBoxLayout(self.image_widget)
+
+        # Image controls toolbar
+        self.image_controls = QHBoxLayout()
+
+        self.zoom_in_button = QPushButton("Zoom In")
+        self.zoom_in_button.clicked.connect(self.zoom_in)
+        self.zoom_out_button = QPushButton("Zoom Out")
+        self.zoom_out_button.clicked.connect(self.zoom_out)
+        self.zoom_fit_button = QPushButton("Fit to Window")
+        self.zoom_fit_button.clicked.connect(self.zoom_fit)
+        self.zoom_actual_button = QPushButton("Actual Size")
+        self.zoom_actual_button.clicked.connect(self.zoom_actual)
+
+        self.image_controls.addWidget(self.zoom_in_button)
+        self.image_controls.addWidget(self.zoom_out_button)
+        self.image_controls.addWidget(self.zoom_fit_button)
+        self.image_controls.addWidget(self.zoom_actual_button)
+        self.image_controls.addStretch()
+
+        self.image_layout.addLayout(self.image_controls)
+
+        # Image scroll area
+        self.image_scroll_area = QScrollArea(self)
+        self.image_scroll_area.setWidgetResizable(False)  # Changed for zoom functionality
         self.image_label = QLabel()
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_label.setScaledContents(False)
         self.image_scroll_area.setWidget(self.image_label)
-        self.stacked_widget.addWidget(self.image_scroll_area)
 
-        # Page 2: Text Preview
+        self.image_layout.addWidget(self.image_scroll_area)
+        self.stacked_widget.addWidget(self.image_widget)
+
+        # Image zoom variables
+        self.current_pixmap = None
+        self.zoom_factor = 1.0
+
+        # Page 2: Text Preview with controls
+        self.text_widget = QWidget()
+        self.text_layout = QVBoxLayout(self.text_widget)
+
+        # Text controls toolbar
+        self.text_controls = QHBoxLayout()
+
+        self.file_type_label = QLabel()
+        self.file_type_label.setStyleSheet("font-weight: bold; color: #666;")
+
+        self.line_numbers_checkbox = QCheckBox("Line Numbers")
+        self.line_numbers_checkbox.setChecked(True)
+        self.line_numbers_checkbox.toggled.connect(self.toggle_line_numbers)
+
+        self.find_button = QPushButton("Find")
+        self.find_button.clicked.connect(self.show_find_dialog)
+
+        self.find_next_button = QPushButton("Find Next")
+        self.find_next_button.clicked.connect(self.find_next)
+        self.find_next_button.setEnabled(False)
+
+        self.word_wrap_checkbox = QCheckBox("Word Wrap")
+        self.word_wrap_checkbox.setChecked(True)
+        self.word_wrap_checkbox.toggled.connect(self.toggle_word_wrap)
+
+        self.text_controls.addWidget(self.file_type_label)
+        self.text_controls.addStretch()
+        self.text_controls.addWidget(self.line_numbers_checkbox)
+        self.text_controls.addWidget(self.find_button)
+        self.text_controls.addWidget(self.find_next_button)
+        self.text_controls.addWidget(self.word_wrap_checkbox)
+
+        self.text_layout.addLayout(self.text_controls)
+
+        # Text display area
         self.text_edit = QTextEdit(self)
         self.text_edit.setReadOnly(True)
-        self.stacked_widget.addWidget(self.text_edit)
+        self.text_edit.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        self.text_layout.addWidget(self.text_edit)
+
+        self.stacked_widget.addWidget(self.text_widget)
+
+        # Page 2b: Syntax Highlighted Text Preview
+        self.syntax_text_edit = QTextEdit(self)
+        self.syntax_text_edit.setReadOnly(True)
+        self.stacked_widget.addWidget(self.syntax_text_edit)
 
         # Page 3: Unsupported file type
         self.unsupported_label = QLabel("Preview not available for this file type.")
@@ -652,10 +725,139 @@ class PreviewPanel(QWidget):
         self.stacked_widget.addWidget(self.error_label)
 
         self.current_path = None
+        self.last_search_text = ""
+        self.current_pixmap = None
+        self.zoom_factor = 1.0
+        self.current_text_content = None
 
     def clear_preview(self):
         self.stacked_widget.setCurrentWidget(self.no_preview_label)
         self.current_path = None
+        self.last_search_text = ""
+        self.current_pixmap = None
+        self.zoom_factor = 1.0
+        self.current_text_content = None
+
+    def zoom_in(self):
+        """Zoom in the image."""
+        if self.current_pixmap:
+            self.zoom_factor *= 1.2
+            self._update_image_display()
+
+    def zoom_out(self):
+        """Zoom out the image."""
+        if self.current_pixmap:
+            self.zoom_factor /= 1.2
+            self._update_image_display()
+
+    def zoom_fit(self):
+        """Fit image to window."""
+        if self.current_pixmap:
+            self.zoom_factor = 1.0
+            self._update_image_display(fit_to_window=True)
+
+    def zoom_actual(self):
+        """Show image at actual size."""
+        if self.current_pixmap:
+            self.zoom_factor = 1.0
+            self._update_image_display(actual_size=True)
+
+    def _update_image_display(self, fit_to_window=False, actual_size=False):
+        """Update the image display with current zoom factor."""
+        if not self.current_pixmap:
+            return
+
+        if fit_to_window:
+            # Scale to fit the scroll area
+            scaled_pixmap = self.current_pixmap.scaled(
+                self.image_scroll_area.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
+        elif actual_size:
+            # Show at original size
+            scaled_pixmap = self.current_pixmap
+        else:
+            # Apply zoom factor
+            new_size = self.current_pixmap.size() * self.zoom_factor
+            scaled_pixmap = self.current_pixmap.scaled(
+                new_size,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
+
+        self.image_label.setPixmap(scaled_pixmap)
+        self.image_label.resize(scaled_pixmap.size())
+
+    def toggle_line_numbers(self, enabled):
+        """Toggle line numbers in text preview."""
+        if hasattr(self, 'current_text_content'):
+            self._update_text_display(self.current_text_content, enabled)
+
+    def toggle_word_wrap(self, enabled):
+        """Toggle word wrap in text preview."""
+        if enabled:
+            self.text_edit.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        else:
+            self.text_edit.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+
+    def show_find_dialog(self):
+        """Show find dialog for text search."""
+        from PySide6.QtWidgets import QInputDialog
+        text, ok = QInputDialog.getText(self, "Find", "Enter text to find:", text=self.last_search_text)
+        if ok and text:
+            self.last_search_text = text
+            self.find_text(text)
+
+    def find_text(self, text):
+        """Find and highlight text in the text editor."""
+        # Use the currently active text widget
+        active_text_widget = self.text_edit if self.stacked_widget.currentWidget() == self.text_widget else self.syntax_text_edit
+
+        cursor = active_text_widget.textCursor()
+        cursor.movePosition(cursor.MoveOperation.Start)
+        active_text_widget.setTextCursor(cursor)
+
+        if active_text_widget.find(text):
+            # Text found and highlighted
+            self.find_next_button.setEnabled(True)
+        else:
+            # Text not found, show message
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "Find", f"Text '{text}' not found.")
+            self.find_next_button.setEnabled(False)
+
+    def find_next(self):
+        """Find the next occurrence of the last searched text."""
+        if not self.last_search_text:
+            self.show_find_dialog()
+            return
+
+        # Use the currently active text widget
+        active_text_widget = self.text_edit if self.stacked_widget.currentWidget() == self.text_widget else self.syntax_text_edit
+
+        if not active_text_widget.find(self.last_search_text):
+            # No more occurrences found, wrap to beginning
+            cursor = active_text_widget.textCursor()
+            cursor.movePosition(cursor.MoveOperation.Start)
+            active_text_widget.setTextCursor(cursor)
+
+            if not active_text_widget.find(self.last_search_text):
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.information(self, "Find Next", f"No more occurrences of '{self.last_search_text}' found.")
+
+    def _update_text_display(self, content, show_line_numbers=True):
+        """Update text display with or without line numbers."""
+        if show_line_numbers:
+            lines = content.split('\n')
+            numbered_lines = []
+            for i, line in enumerate(lines, 1):
+                numbered_lines.append(f"{i:4d}: {line}")
+            display_content = '\n'.join(numbered_lines)
+        else:
+            display_content = content
+
+        self.text_edit.setPlainText(display_content)
 
     def update_preview(self, path_obj: pathlib.Path = None):
             if not path_obj or not path_obj.exists() or path_obj.is_dir():
@@ -669,25 +871,55 @@ class PreviewPanel(QWidget):
             mime_type, _ = mimetypes.guess_type(path_obj)
             file_suffix = path_obj.suffix.lower()
 
-            # Image Preview
-            image_extensions = ['.png', '.jpg', '.jpeg', '.gif', '.bmp']
+            # Image Preview - Expanded format support
+            image_extensions = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.tif', '.webp', '.ico', '.svg']
             is_image_mime = mime_type and mime_type.startswith('image/')
 
             if file_suffix in image_extensions or is_image_mime:
-                pixmap = QPixmap(str(path_obj))
-                if not pixmap.isNull():
-                    # Scale the pixmap to fit the label, preserving aspect ratio
-                    scaled_pixmap = pixmap.scaled(self.image_label.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-                    self.image_label.setPixmap(scaled_pixmap)
-                    self.stacked_widget.setCurrentWidget(self.image_scroll_area)
+                # Handle SVG files specially
+                if file_suffix.lower() == '.svg':
+                    try:
+                        from PySide6.QtSvg import QSvgWidget
+                        svg_widget = QSvgWidget(str(path_obj))
+                        if svg_widget.renderer().isValid():
+                            # Create a scroll area for SVG
+                            svg_scroll = QScrollArea()
+                            svg_scroll.setWidgetResizable(True)
+                            svg_scroll.setWidget(svg_widget)
+                            # Replace the current widget temporarily
+                            self.stacked_widget.addWidget(svg_scroll)
+                            self.stacked_widget.setCurrentWidget(svg_scroll)
+                        else:
+                            self.error_label.setText(f"Could not load SVG: {path_obj.name}\n(Invalid SVG format)")
+                            self.stacked_widget.setCurrentWidget(self.error_label)
+                    except ImportError:
+                        # Fall back to regular image loading if QtSvg not available
+                        pixmap = QPixmap(str(path_obj))
+                        if not pixmap.isNull():
+                            self.current_pixmap = pixmap
+                            self.zoom_factor = 1.0
+                            self._update_image_display(fit_to_window=True)
+                            self.stacked_widget.setCurrentWidget(self.image_widget)
+                        else:
+                            self.error_label.setText(f"Could not load image: {path_obj.name}\n(QtSvg not available and format not supported)")
+                            self.stacked_widget.setCurrentWidget(self.error_label)
                 else:
-                    # This is a genuine image loading failure
-                    self.error_label.setText(f"Could not load image: {path_obj.name}\n(Format might be unsupported or file corrupted)")
-                    self.stacked_widget.setCurrentWidget(self.error_label)
+                    # Regular image formats
+                    pixmap = QPixmap(str(path_obj))
+                    if not pixmap.isNull():
+                        # Store the original pixmap and reset zoom
+                        self.current_pixmap = pixmap
+                        self.zoom_factor = 1.0
+                        self._update_image_display(fit_to_window=True)
+                        self.stacked_widget.setCurrentWidget(self.image_widget)
+                    else:
+                        # This is a genuine image loading failure
+                        self.error_label.setText(f"Could not load image: {path_obj.name}\n(Format might be unsupported or file corrupted)")
+                        self.stacked_widget.setCurrentWidget(self.error_label)
                 return # Processed as image (or image attempt)
 
-            # Text Preview
-            text_extensions = ['.txt', '.log', '.md', '.py', '.c', '.cpp', '.h', '.json', '.xml', '.html', '.css', '.js', '.ini', '.conf', '.cfg', '.yaml', '.yml'] # Added more
+            # Text Preview - Expanded format support
+            text_extensions = ['.txt', '.log', '.md', '.py', '.c', '.cpp', '.h', '.json', '.xml', '.html', '.css', '.js', '.ini', '.conf', '.cfg', '.yaml', '.yml', '.rs', '.go', '.java', '.php', '.rb', '.sh', '.bash', '.zsh', '.fish', '.sql', '.cmake', '.makefile', '.dockerfile', '.gitignore', '.env']
             is_text_mime = mime_type and (
                 mime_type.startswith('text/') or
                 mime_type in ['application/json', 'application/xml', 'application/x-python', 'application/javascript'] # Added more common text mimes
@@ -723,16 +955,342 @@ class PreviewPanel(QWidget):
                     if len(content) == MAX_PREVIEW_SIZE:
                         content += "\n\n[File content truncated for preview]"
 
-                    self.text_edit.setPlainText(content)
-                    self.stacked_widget.setCurrentWidget(self.text_edit)
+                    # Store content for line number toggling
+                    self.current_text_content = content
+
+                    # Update file type label
+                    self._update_file_type_label(path_obj)
+
+                    # Try syntax highlighting for code files
+                    if self._apply_syntax_highlighting(path_obj, content):
+                        self.stacked_widget.setCurrentWidget(self.syntax_text_edit)
+                    else:
+                        self._update_text_display(content, self.line_numbers_checkbox.isChecked())
+                        self.stacked_widget.setCurrentWidget(self.text_widget)
                 except Exception as e: # Catch-all for other unexpected errors during text processing
                     self.error_label.setText(f"Error reading text file: {path_obj.name}\n{e}")
                     self.stacked_widget.setCurrentWidget(self.error_label)
                 return # Processed as text
 
             # If no specific preview is available
-            self.unsupported_label.setText(f"Preview not available for '{path_obj.name}'\n(Type: {mime_type or 'Unknown'})")
+            self._show_unsupported_preview(path_obj, mime_type)
             self.stacked_widget.setCurrentWidget(self.unsupported_label)
+
+    def _apply_syntax_highlighting(self, path_obj: pathlib.Path, content: str) -> bool:
+        """Apply syntax highlighting to code files. Returns True if highlighting was applied."""
+        try:
+            from PySide6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor, QFont
+            from PySide6.QtCore import QRegularExpression
+
+            # Simple syntax highlighting for common languages
+            file_suffix = path_obj.suffix.lower()
+
+            # Define syntax highlighting rules
+            if file_suffix == '.py':
+                self._apply_python_highlighting(content)
+                return True
+            elif file_suffix in ['.js', '.json']:
+                self._apply_javascript_highlighting(content)
+                return True
+            elif file_suffix in ['.html', '.xml']:
+                self._apply_html_highlighting(content)
+                return True
+            elif file_suffix in ['.css']:
+                self._apply_css_highlighting(content)
+                return True
+            elif file_suffix in ['.md']:
+                self._apply_markdown_highlighting(content)
+                return True
+            else:
+                # For other code files, apply basic highlighting
+                self._apply_basic_highlighting(content)
+                return True
+
+        except ImportError:
+            # If syntax highlighting is not available, fall back to plain text
+            return False
+        except Exception:
+            # If highlighting fails, fall back to plain text
+            return False
+
+    def _apply_python_highlighting(self, content: str):
+        """Apply Python syntax highlighting."""
+        from PySide6.QtGui import QTextCharFormat, QColor
+
+        self.syntax_text_edit.setPlainText(content)
+
+        # Set a monospace font for better code display
+        font = self.syntax_text_edit.font()
+        font.setFamily("Consolas, Monaco, 'Courier New', monospace")
+        font.setPointSize(10)
+        self.syntax_text_edit.setFont(font)
+
+        # Basic Python keyword highlighting
+        cursor = self.syntax_text_edit.textCursor()
+        format_keyword = QTextCharFormat()
+        format_keyword.setForeground(QColor(127, 0, 85))  # Purple for keywords
+
+        keywords = ['def', 'class', 'if', 'else', 'elif', 'for', 'while', 'try', 'except', 'finally',
+                   'import', 'from', 'return', 'yield', 'break', 'continue', 'pass', 'with', 'as']
+
+        for keyword in keywords:
+            cursor.movePosition(cursor.MoveOperation.Start)
+            while cursor.findText(f'\\b{keyword}\\b', cursor.FindFlag.FindCaseSensitively | cursor.FindFlag.FindRegExp):
+                cursor.mergeCharFormat(format_keyword)
+
+    def _apply_javascript_highlighting(self, content: str):
+        """Apply JavaScript syntax highlighting."""
+        from PySide6.QtGui import QTextCharFormat, QColor
+
+        self.syntax_text_edit.setPlainText(content)
+
+        # Set a monospace font
+        font = self.syntax_text_edit.font()
+        font.setFamily("Consolas, Monaco, 'Courier New', monospace")
+        font.setPointSize(10)
+        self.syntax_text_edit.setFont(font)
+
+        # Basic JavaScript keyword highlighting
+        cursor = self.syntax_text_edit.textCursor()
+        format_keyword = QTextCharFormat()
+        format_keyword.setForeground(QColor(0, 0, 255))  # Blue for keywords
+
+        keywords = ['function', 'var', 'let', 'const', 'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'break', 'continue', 'return', 'try', 'catch', 'finally', 'throw', 'new', 'this', 'typeof', 'instanceof', 'true', 'false', 'null', 'undefined']
+
+        for keyword in keywords:
+            cursor.movePosition(cursor.MoveOperation.Start)
+            while cursor.findText(f'\\b{keyword}\\b', cursor.FindFlag.FindCaseSensitively | cursor.FindFlag.FindRegExp):
+                cursor.mergeCharFormat(format_keyword)
+
+    def _apply_html_highlighting(self, content: str):
+        """Apply HTML syntax highlighting."""
+        from PySide6.QtGui import QTextCharFormat, QColor
+
+        self.syntax_text_edit.setPlainText(content)
+
+        # Set a monospace font
+        font = self.syntax_text_edit.font()
+        font.setFamily("Consolas, Monaco, 'Courier New', monospace")
+        font.setPointSize(10)
+        self.syntax_text_edit.setFont(font)
+
+        # Basic HTML tag highlighting
+        cursor = self.syntax_text_edit.textCursor()
+        format_tag = QTextCharFormat()
+        format_tag.setForeground(QColor(163, 21, 21))  # Dark red for tags
+
+        # Find HTML tags
+        cursor.movePosition(cursor.MoveOperation.Start)
+        while cursor.findText('<[^>]+>', cursor.FindFlag.FindRegExp):
+            cursor.mergeCharFormat(format_tag)
+
+    def _apply_css_highlighting(self, content: str):
+        """Apply CSS syntax highlighting."""
+        from PySide6.QtGui import QTextCharFormat, QColor
+
+        self.syntax_text_edit.setPlainText(content)
+
+        # Set a monospace font
+        font = self.syntax_text_edit.font()
+        font.setFamily("Consolas, Monaco, 'Courier New', monospace")
+        font.setPointSize(10)
+        self.syntax_text_edit.setFont(font)
+
+        # Basic CSS selector highlighting
+        cursor = self.syntax_text_edit.textCursor()
+        format_selector = QTextCharFormat()
+        format_selector.setForeground(QColor(0, 128, 0))  # Green for selectors
+
+        # Find CSS selectors (simplified)
+        cursor.movePosition(cursor.MoveOperation.Start)
+        while cursor.findText('[a-zA-Z#\\.][^{]*\\{', cursor.FindFlag.FindRegExp):
+            cursor.mergeCharFormat(format_selector)
+
+    def _apply_markdown_highlighting(self, content: str):
+        """Apply Markdown syntax highlighting."""
+        from PySide6.QtGui import QTextCharFormat, QColor, QFont
+
+        self.syntax_text_edit.setPlainText(content)
+
+        # Set a slightly larger font for markdown
+        font = self.syntax_text_edit.font()
+        font.setFamily("Georgia, serif")
+        font.setPointSize(11)
+        self.syntax_text_edit.setFont(font)
+
+        # Basic Markdown highlighting
+        cursor = self.syntax_text_edit.textCursor()
+
+        # Headers
+        format_header = QTextCharFormat()
+        format_header.setForeground(QColor(0, 0, 255))  # Blue for headers
+        format_header.setFontWeight(QFont.Weight.Bold)
+
+        cursor.movePosition(cursor.MoveOperation.Start)
+        while cursor.findText('^#+\\s.*$', cursor.FindFlag.FindRegExp):
+            cursor.mergeCharFormat(format_header)
+
+        # Bold text
+        format_bold = QTextCharFormat()
+        format_bold.setFontWeight(QFont.Weight.Bold)
+
+        cursor.movePosition(cursor.MoveOperation.Start)
+        while cursor.findText('\\*\\*[^*]+\\*\\*', cursor.FindFlag.FindRegExp):
+            cursor.mergeCharFormat(format_bold)
+
+    def _apply_basic_highlighting(self, content: str):
+        """Apply basic code highlighting."""
+        from PySide6.QtGui import QTextCharFormat, QColor
+
+        self.syntax_text_edit.setPlainText(content)
+
+        # Set a monospace font
+        font = self.syntax_text_edit.font()
+        font.setFamily("Consolas, Monaco, 'Courier New', monospace")
+        font.setPointSize(10)
+        self.syntax_text_edit.setFont(font)
+
+        # Basic highlighting for common programming constructs
+        cursor = self.syntax_text_edit.textCursor()
+
+        # Comments (// and /* */)
+        format_comment = QTextCharFormat()
+        format_comment.setForeground(QColor(128, 128, 128))  # Gray for comments
+
+        cursor.movePosition(cursor.MoveOperation.Start)
+        while cursor.findText('//.*$', cursor.FindFlag.FindRegExp):
+            cursor.mergeCharFormat(format_comment)
+
+        cursor.movePosition(cursor.MoveOperation.Start)
+        while cursor.findText('/\\*.*\\*/', cursor.FindFlag.FindRegExp):
+            cursor.mergeCharFormat(format_comment)
+
+        # Strings
+        format_string = QTextCharFormat()
+        format_string.setForeground(QColor(0, 128, 0))  # Green for strings
+
+        cursor.movePosition(cursor.MoveOperation.Start)
+        while cursor.findText('"[^"]*"', cursor.FindFlag.FindRegExp):
+            cursor.mergeCharFormat(format_string)
+
+        cursor.movePosition(cursor.MoveOperation.Start)
+        while cursor.findText("'[^']*'", cursor.FindFlag.FindRegExp):
+            cursor.mergeCharFormat(format_string)
+
+    def _update_file_type_label(self, path_obj: pathlib.Path):
+        """Update the file type label with icon and description."""
+        file_suffix = path_obj.suffix.lower()
+        mime_type, _ = mimetypes.guess_type(path_obj)
+
+        # Get file type icon and description
+        icon_text = self._get_file_type_icon(file_suffix, mime_type)
+        description = self._get_file_type_description(file_suffix, mime_type)
+
+        self.file_type_label.setText(f"{icon_text} {description}")
+
+    def _get_file_type_icon(self, suffix: str, mime_type: str) -> str:
+        """Get an emoji icon for the file type."""
+        if suffix in ['.py']:
+            return "🐍"
+        elif suffix in ['.js', '.json']:
+            return "🟨"
+        elif suffix in ['.html', '.htm']:
+            return "🌐"
+        elif suffix in ['.css']:
+            return "🎨"
+        elif suffix in ['.md']:
+            return "📝"
+        elif suffix in ['.txt', '.log']:
+            return "📄"
+        elif suffix in ['.xml']:
+            return "🔧"
+        elif suffix in ['.sql']:
+            return "🗄️"
+        elif suffix in ['.sh', '.bash']:
+            return "⚡"
+        elif suffix in ['.java']:
+            return "☕"
+        elif suffix in ['.cpp', '.c', '.h']:
+            return "⚙️"
+        elif suffix in ['.rs']:
+            return "🦀"
+        elif suffix in ['.go']:
+            return "🐹"
+        elif suffix in ['.php']:
+            return "🐘"
+        elif suffix in ['.rb']:
+            return "💎"
+        elif mime_type and mime_type.startswith('text/'):
+            return "📄"
+        else:
+            return "📄"
+
+    def _get_file_type_description(self, suffix: str, mime_type: str) -> str:
+        """Get a description for the file type."""
+        type_descriptions = {
+            '.py': 'Python Script',
+            '.js': 'JavaScript',
+            '.json': 'JSON Data',
+            '.html': 'HTML Document',
+            '.htm': 'HTML Document',
+            '.css': 'CSS Stylesheet',
+            '.md': 'Markdown Document',
+            '.txt': 'Text Document',
+            '.log': 'Log File',
+            '.xml': 'XML Document',
+            '.sql': 'SQL Script',
+            '.sh': 'Shell Script',
+            '.bash': 'Bash Script',
+            '.java': 'Java Source',
+            '.cpp': 'C++ Source',
+            '.c': 'C Source',
+            '.h': 'C/C++ Header',
+            '.rs': 'Rust Source',
+            '.go': 'Go Source',
+            '.php': 'PHP Script',
+            '.rb': 'Ruby Script',
+            '.yml': 'YAML Configuration',
+            '.yaml': 'YAML Configuration',
+            '.ini': 'Configuration File',
+            '.conf': 'Configuration File',
+            '.cfg': 'Configuration File',
+        }
+
+        return type_descriptions.get(suffix, mime_type or 'Text File')
+
+    def _show_unsupported_preview(self, path_obj: pathlib.Path, mime_type: str):
+        """Show enhanced unsupported file preview with suggestions."""
+        file_size = path_obj.stat().st_size
+        size_mb = file_size / (1024 * 1024)
+
+        # Get file type icon
+        icon = self._get_file_type_icon(path_obj.suffix.lower(), mime_type)
+
+        message = f"{icon} {path_obj.name}\n\n"
+        message += f"Type: {mime_type or 'Unknown'}\n"
+        message += f"Size: {size_mb:.1f} MB\n\n"
+
+        # Add suggestions based on file type
+        if mime_type:
+            if mime_type.startswith('video/'):
+                message += "💡 This is a video file. Use a video player to view it."
+            elif mime_type.startswith('audio/'):
+                message += "💡 This is an audio file. Use an audio player to listen to it."
+            elif mime_type.startswith('application/'):
+                if 'pdf' in mime_type:
+                    message += "💡 This is a PDF document. Use a PDF viewer to open it."
+                elif 'zip' in mime_type or 'archive' in mime_type:
+                    message += "💡 This is an archive file. Use an archive manager to extract it."
+                elif 'office' in mime_type or 'word' in mime_type:
+                    message += "💡 This is an office document. Use an office suite to open it."
+                else:
+                    message += "💡 This file requires a specific application to open."
+            else:
+                message += "💡 Preview not available for this file type."
+        else:
+            message += "💡 File type not recognized. Try opening with an appropriate application."
+
+        self.unsupported_label.setText(message)
 
 class OrganizationConfigPanel(QWidget):
     organize_triggered = Signal(OrganizationSettings)

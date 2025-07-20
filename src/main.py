@@ -26,6 +26,7 @@ DryRunResultsDialog
 from engine import OrganizationEngine
 from worker import OrganizationWorker
 from settings_manager import SettingsManager
+from settings_dialog import SettingsDialog
 from commands import UndoManager, BatchMoveCommand, BatchCopyCommand, CreateFolderCommand, RenameCommand, DeleteCommand
 
 class MainWindow(QMainWindow):
@@ -79,17 +80,26 @@ class MainWindow(QMainWindow):
                 self.file_browser_panel.current_path = last_path
                 self.file_browser_panel.refresh_list()
 
+            # Apply user settings
+            self.apply_settings(state)
+
             print("Application state loaded.")
 
     def save_app_state(self):
         """Saves current application state to config file."""
         print("Saving application state...")
-        current_state = {
+
+        # Load existing settings to preserve user preferences
+        current_state = self.settings_manager.load_settings()
+
+        # Update with current application state
+        current_state.update({
             "main_window_geometry": [self.x(), self.y(), self.width(), self.height()],
             "organization_panel": self.organization_config_panel.get_ui_state(),
             "last_browsed_path": self.file_browser_panel.current_path,
             # We could add splitter sizes here later if desired
-        }
+        })
+
         self.settings_manager.save_settings(current_state)
         print("Application state saved.")
 
@@ -171,6 +181,7 @@ class MainWindow(QMainWindow):
 
         self._create_file_menu(menu_bar)
         self._create_edit_menu(menu_bar)
+        self._create_tools_menu(menu_bar)
         self._create_help_menu(menu_bar)
 
     def _create_file_menu(self, menu_bar):
@@ -200,6 +211,19 @@ class MainWindow(QMainWindow):
         )
         edit_menu.addAction(self.redo_action)
 
+    def _create_tools_menu(self, menu_bar):
+        """Create the Tools menu with settings and other tools."""
+        tools_menu = menu_bar.addMenu("&Tools")
+
+        # Settings action
+        settings_action = self._create_action(
+            text="&Settings...",
+            shortcut=Qt.Key.Key_Comma | Qt.KeyboardModifier.ControlModifier,
+            slot=self.show_settings_dialog,
+            enabled=True
+        )
+        tools_menu.addAction(settings_action)
+
     def _create_help_menu(self, menu_bar):
         """Create the Help menu with its actions."""
         help_menu = menu_bar.addMenu("&Help")
@@ -217,7 +241,96 @@ class MainWindow(QMainWindow):
         action.setEnabled(enabled)
         return action
 
+    def show_settings_dialog(self):
+        """Show the settings dialog."""
+        try:
+            current_settings = self.settings_manager.load_settings()
+            dialog = SettingsDialog(current_settings, self)
 
+            # Connect settings changed signal
+            dialog.settings_changed.connect(self.on_settings_changed)
+
+            if dialog.exec() == SettingsDialog.DialogCode.Accepted:
+                # Settings were applied via the signal
+                pass
+        except Exception as e:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Error", f"Failed to open settings dialog: {e}")
+
+    def on_settings_changed(self, new_settings: dict):
+        """Handle settings changes."""
+        try:
+            # Save the new settings
+            self.settings_manager.save_settings(new_settings)
+
+            # Apply settings to the application
+            self.apply_settings(new_settings)
+
+            self.statusBar().showMessage("Settings applied successfully", 3000)
+        except Exception as e:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Error", f"Failed to apply settings: {e}")
+
+    def apply_settings(self, settings: dict):
+        """Apply settings to the application."""
+        # Apply preview settings
+        if hasattr(self, 'preview_panel'):
+            # Update line numbers default
+            show_line_numbers = settings.get('show_line_numbers_default', True)
+            if hasattr(self.preview_panel, 'line_numbers_checkbox'):
+                self.preview_panel.line_numbers_checkbox.setChecked(show_line_numbers)
+
+            # Update word wrap default
+            word_wrap = settings.get('word_wrap_default', True)
+            if hasattr(self.preview_panel, 'word_wrap_checkbox'):
+                self.preview_panel.word_wrap_checkbox.setChecked(word_wrap)
+
+        # Apply organization settings to the config panel
+        if hasattr(self, 'organization_config_panel'):
+            # Update default structure template
+            default_template = settings.get('default_structure_template', '[YYYY]/[MM]/[Filename].[Ext]')
+            if hasattr(self.organization_config_panel, 'structure_template_edit'):
+                self.organization_config_panel.structure_template_edit.setText(default_template)
+                # Set preset to custom since we're setting a template
+                if hasattr(self.organization_config_panel, 'structure_preset_combo'):
+                    self.organization_config_panel.structure_preset_combo.setCurrentText('Custom')
+
+            # Update default conflict resolution
+            default_conflict = settings.get('default_conflict_resolution', 'Skip')
+            if hasattr(self.organization_config_panel, 'conflict_resolution_combo'):
+                self.organization_config_panel.conflict_resolution_combo.setCurrentText(default_conflict)
+
+            # Update rename conflict resolution too
+            if hasattr(self.organization_config_panel, 'rename_conflict_resolution_combo'):
+                self.organization_config_panel.rename_conflict_resolution_combo.setCurrentText(default_conflict)
+
+            # Update default operation type
+            default_operation = settings.get('default_operation_type', 'Move')
+            if hasattr(self.organization_config_panel, 'operation_type_combo'):
+                self.organization_config_panel.operation_type_combo.setCurrentText(default_operation)
+
+            # Update default dry run
+            default_dry_run = settings.get('default_dry_run', True)
+            if hasattr(self.organization_config_panel, 'dry_run_checkbox'):
+                self.organization_config_panel.dry_run_checkbox.setChecked(default_dry_run)
+            if hasattr(self.organization_config_panel, 'rename_dry_run_checkbox'):
+                self.organization_config_panel.rename_dry_run_checkbox.setChecked(default_dry_run)
+
+            # Update default name filter type
+            default_name_filter = settings.get('default_name_filter_type', 'Contains')
+            if hasattr(self.organization_config_panel, 'name_filter_type'):
+                self.organization_config_panel.name_filter_type.setCurrentText(default_name_filter)
+
+        # Apply UI settings
+        theme = settings.get('theme', 'System Default')
+        if theme != 'System Default':
+            # Apply theme (this would need theme implementation)
+            pass
+
+        # Apply undo manager settings
+        undo_history_size = settings.get('undo_history_size', 50)
+        if hasattr(self, 'undo_manager'):
+            self.undo_manager.max_undo_levels = undo_history_size
 
     def _create_status_bar(self):
         self.statusBar().showMessage("Ready")
