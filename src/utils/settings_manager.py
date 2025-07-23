@@ -18,11 +18,8 @@ DEFAULT_SETTINGS = {
     # Preview defaults
     "default_zoom_behavior": "Fit to Window",
     "custom_zoom_scale": 1.0,
-    "image_background": "White",
     "show_line_numbers_default": True,
     "word_wrap_default": True,
-    "text_font_family": "Consolas",
-    "text_font_size": 10,
     "tab_width": 4,
     "max_preview_size_mb": 1,
     "enable_syntax_highlighting": True,
@@ -65,7 +62,31 @@ DEFAULT_SETTINGS = {
         ".css": "text",
         ".xml": "text",
         ".log": "text"
-    }
+    },
+
+    # Permissions settings
+    "permissions_enabled": False,
+    "directory_permissions": 0o755,
+    "image_permissions": 0o644,
+    "text_permissions": 0o644,
+    "document_permissions": 0o644,
+    "archive_permissions": 0o644,
+    "executable_permissions": 0o755,
+    "video_permissions": 0o644,
+    "audio_permissions": 0o644,
+    "default_permissions": 0o644,
+    "recursive_permissions": False,
+
+    # Encryption settings
+    "encryption_enabled": True,
+    "default_encryption_algorithm": "AES-256-CBC",
+    "default_key_derivation": "PBKDF2-SHA256",
+    "default_iterations": 100000,
+    "store_passwords_in_keyring": True,
+    "auto_store_passwords": False,
+    "require_password_confirmation": True,
+    "minimum_password_length": 8,
+    "show_password_strength": True,
 }
 
 class SettingsManager:

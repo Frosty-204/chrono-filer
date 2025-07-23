@@ -119,6 +119,28 @@ To empower users to efficiently organize large sets of files into a structured d
 
 6. Background processing for very large organization tasks with system notifications.
 
+**Phase 4: Advanced File Processing Features**
+
+1. **File Permissions Management:**
+   - Set POSIX permissions (Unix/Linux/macOS) during file organization
+   - Configurable permissions for different file types
+   - Recursive permission setting for directories
+   - Preview permissions changes before execution
+
+2. **File Compression & Archiving:**
+   - Support for multiple archive formats: ZIP, TAR.GZ, TAR.BZ2, TAR.XZ
+   - Compression level selection (fast, normal, maximum)
+   - Archive naming templates with variables
+   - Option to compress individual files or entire directory structures
+   - Split large archives into volumes
+
+3. **File Encryption:**
+   - AES-256 encryption for compressed archives
+   - Password-based encryption with key derivation
+   - Secure key management using system keyring
+   - Encryption preview and verification
+   - Support for encrypted individual files and archives
+
 
 **III. High-Level Architecture:**
 

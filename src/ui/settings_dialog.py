@@ -42,6 +42,8 @@ class SettingsDialog(QDialog):
         self._create_preview_tab()
         self._create_ui_tab()
         self._create_advanced_tab()
+        self._create_permissions_tab()
+        self._create_encryption_tab()
 
         # Create button box
         button_layout = QHBoxLayout()
@@ -160,27 +162,11 @@ class SettingsDialog(QDialog):
         self.custom_zoom_spin.setSuffix("x")
         image_layout.addRow("Custom Zoom Scale:", self.custom_zoom_spin)
 
-        # Image background color (simplified)
-        self.image_bg_combo = QComboBox()
-        self.image_bg_combo.addItems(["White", "Black", "Gray", "Transparent"])
-        image_layout.addRow("Image Background:", self.image_bg_combo)
-
         layout.addWidget(image_group)
 
         # Text Preview Settings
         text_group = QGroupBox("Text Preview Settings")
         text_layout = QFormLayout(text_group)
-
-        # Font family selection
-        self.text_font_combo = QComboBox()
-        self.text_font_combo.addItems(["Consolas", "Monaco", "Courier New", "Fira Code", "Source Code Pro", "DejaVu Sans Mono"])
-        text_layout.addRow("Text Font Family:", self.text_font_combo)
-
-        # Font size
-        self.text_font_size_spin = QSpinBox()
-        self.text_font_size_spin.setRange(8, 24)
-        self.text_font_size_spin.setValue(10)
-        text_layout.addRow("Font Size:", self.text_font_size_spin)
 
         # Show line numbers by default
         self.show_line_numbers_check = QCheckBox("Show line numbers by default")
@@ -392,6 +378,145 @@ class SettingsDialog(QDialog):
         layout.addStretch()
         self.tab_widget.addTab(tab_widget, "Advanced")
 
+    def _create_permissions_tab(self):
+        """Create the Permissions settings tab."""
+        tab_widget = QWidget()
+        layout = QVBoxLayout(tab_widget)
+
+        # Encryption Settings
+        encryption_group = QGroupBox("Encryption Settings")
+        encryption_layout = QFormLayout(encryption_group)
+
+        # Enable encryption
+        self.encryption_enabled_check = QCheckBox("Enable file encryption features")
+        self.encryption_enabled_check.setToolTip("Allow encryption of files and archives")
+        encryption_layout.addRow(self.encryption_enabled_check)
+
+        # Default encryption algorithm
+        self.encryption_algorithm_combo = QComboBox()
+        self.encryption_algorithm_combo.addItems(["AES-256-CBC", "AES-256-GCM"])
+        self.encryption_algorithm_combo.setToolTip("Default encryption algorithm for new operations")
+        encryption_layout.addRow("Default Algorithm:", self.encryption_algorithm_combo)
+
+        # Key derivation iterations
+        self.key_iterations_spin = QSpinBox()
+        self.key_iterations_spin.setRange(10000, 1000000)
+        self.key_iterations_spin.setValue(100000)
+        self.key_iterations_spin.setSingleStep(10000)
+        encryption_layout.addRow("Key Derivation Iterations:", self.key_iterations_spin)
+
+        # Store passwords in keyring
+        self.store_passwords_check = QCheckBox("Store passwords in system keyring")
+        self.store_passwords_check.setToolTip("Remember passwords securely using system keyring")
+        encryption_layout.addRow(self.store_passwords_check)
+
+        # Auto-verify encrypted files
+        self.auto_verify_check = QCheckBox("Auto-verify encrypted files after creation")
+        encryption_layout.addRow(self.auto_verify_check)
+
+        layout.addWidget(encryption_group)
+
+        # Permissions Settings
+        permissions_group = QGroupBox("POSIX Permissions")
+        permissions_layout = QFormLayout(permissions_group)
+
+        # Enable permissions
+        self.permissions_enabled_check = QCheckBox("Enable POSIX permissions management")
+        self.permissions_enabled_check.setToolTip("Apply custom permissions to files during organization")
+        permissions_layout.addRow(self.permissions_enabled_check)
+
+        # Permission Presets
+        preset_group = QGroupBox("Permission Presets")
+        preset_layout = QFormLayout(preset_group)
+
+        self.preset_combo = QComboBox()
+        self.preset_combo.addItems([
+            "Secure (Private)",
+            "Standard (Recommended)",
+            "Shared (Group Access)",
+            "Public (Open)",
+            "Custom"
+        ])
+        self.preset_combo.setToolTip("Choose from predefined permission sets or create custom permissions")
+        preset_layout.addRow("Permission Preset:", self.preset_combo)
+
+        # Directory permissions
+        self.directory_permissions_spin = QSpinBox()
+        self.directory_permissions_spin.setRange(0o000, 0o777)
+        self.directory_permissions_spin.setDisplayIntegerBase(8)
+        self.directory_permissions_spin.setPrefix("0o")
+        self.directory_permissions_spin.setToolTip("Default permissions for newly created directories")
+        preset_layout.addRow("Directory Permissions:", self.directory_permissions_spin)
+
+        # File type permissions
+        file_types_group = QGroupBox("File Type Permissions")
+        file_types_layout = QFormLayout(file_types_group)
+
+        self.image_permissions_spin = QSpinBox()
+        self.image_permissions_spin.setRange(0o000, 0o777)
+        self.image_permissions_spin.setDisplayIntegerBase(8)
+        self.image_permissions_spin.setPrefix("0o")
+        
+        self.text_permissions_spin = QSpinBox()
+        self.text_permissions_spin.setRange(0o000, 0o777)
+        self.text_permissions_spin.setDisplayIntegerBase(8)
+        self.text_permissions_spin.setPrefix("0o")
+        
+        self.document_permissions_spin = QSpinBox()
+        self.document_permissions_spin.setRange(0o000, 0o777)
+        self.document_permissions_spin.setDisplayIntegerBase(8)
+        self.document_permissions_spin.setPrefix("0o")
+        
+        self.archive_permissions_spin = QSpinBox()
+        self.archive_permissions_spin.setRange(0o000, 0o777)
+        self.archive_permissions_spin.setDisplayIntegerBase(8)
+        self.archive_permissions_spin.setPrefix("0o")
+        
+        self.executable_permissions_spin = QSpinBox()
+        self.executable_permissions_spin.setRange(0o000, 0o777)
+        self.executable_permissions_spin.setDisplayIntegerBase(8)
+        self.executable_permissions_spin.setPrefix("0o")
+        
+        self.video_permissions_spin = QSpinBox()
+        self.video_permissions_spin.setRange(0o000, 0o777)
+        self.video_permissions_spin.setDisplayIntegerBase(8)
+        self.video_permissions_spin.setPrefix("0o")
+        
+        self.audio_permissions_spin = QSpinBox()
+        self.audio_permissions_spin.setRange(0o000, 0o777)
+        self.audio_permissions_spin.setDisplayIntegerBase(8)
+        self.audio_permissions_spin.setPrefix("0o")
+        
+        self.default_permissions_spin = QSpinBox()
+        self.default_permissions_spin.setRange(0o000, 0o777)
+        self.default_permissions_spin.setDisplayIntegerBase(8)
+        self.default_permissions_spin.setPrefix("0o")
+
+        file_types_layout.addRow("Images:", self.image_permissions_spin)
+        file_types_layout.addRow("Text Files:", self.text_permissions_spin)
+        file_types_layout.addRow("Documents:", self.document_permissions_spin)
+        file_types_layout.addRow("Archives:", self.archive_permissions_spin)
+        file_types_layout.addRow("Executables:", self.executable_permissions_spin)
+        file_types_layout.addRow("Videos:", self.video_permissions_spin)
+        file_types_layout.addRow("Audio:", self.audio_permissions_spin)
+        file_types_layout.addRow("Other Files:", self.default_permissions_spin)
+
+        # Recursive permissions
+        self.recursive_permissions_check = QCheckBox("Apply permissions recursively to directories")
+        self.recursive_permissions_check.setToolTip("When enabled, permissions will be applied to all files within directories")
+        file_types_layout.addRow(self.recursive_permissions_check)
+
+        # Reset button
+        reset_button = QPushButton("Reset to Preset Defaults")
+        reset_button.clicked.connect(self._reset_permissions_to_preset)
+        preset_layout.addRow(reset_button)
+
+        layout.addWidget(permissions_group)
+        layout.addWidget(preset_group)
+        layout.addWidget(file_types_group)
+        layout.addStretch()
+        self.tab_widget.addTab(tab_widget, "Permissions")
+
     def _connect_signals(self):
         """Connect all signals."""
         self.button_box.accepted.connect(self.accept)
@@ -451,12 +576,6 @@ class SettingsDialog(QDialog):
         )
 
         # Text preview connections
-        self.text_font_combo.currentTextChanged.connect(
-            lambda: self._update_temp_setting("text_font_family", self.text_font_combo.currentText())
-        )
-        self.text_font_size_spin.valueChanged.connect(
-            lambda: self._update_temp_setting("text_font_size", self.text_font_size_spin.value())
-        )
         self.tab_width_spin.valueChanged.connect(
             lambda: self._update_temp_setting("tab_width", self.tab_width_spin.value())
         )
@@ -467,9 +586,6 @@ class SettingsDialog(QDialog):
         # Image preview connections
         self.custom_zoom_spin.valueChanged.connect(
             lambda: self._update_temp_setting("custom_zoom_scale", self.custom_zoom_spin.value())
-        )
-        self.image_bg_combo.currentTextChanged.connect(
-            lambda: self._update_temp_setting("image_background", self.image_bg_combo.currentText())
         )
 
         # UI tab
@@ -500,6 +616,62 @@ class SettingsDialog(QDialog):
         # Advanced connections
         self.undo_history_spin.valueChanged.connect(
             lambda: self._update_temp_setting("undo_history_size", self.undo_history_spin.value())
+        )
+
+        # Permissions connections
+        self.permissions_enabled_check.toggled.connect(
+            lambda: self._update_temp_setting("permissions_enabled", self.permissions_enabled_check.isChecked())
+        )
+        self.directory_permissions_spin.valueChanged.connect(
+            lambda: self._update_temp_setting("directory_permissions", self.directory_permissions_spin.value())
+        )
+        self.image_permissions_spin.valueChanged.connect(
+            lambda: self._update_temp_setting("image_permissions", self.image_permissions_spin.value())
+        )
+        self.text_permissions_spin.valueChanged.connect(
+            lambda: self._update_temp_setting("text_permissions", self.text_permissions_spin.value())
+        )
+        self.document_permissions_spin.valueChanged.connect(
+            lambda: self._update_temp_setting("document_permissions", self.document_permissions_spin.value())
+        )
+        self.archive_permissions_spin.valueChanged.connect(
+            lambda: self._update_temp_setting("archive_permissions", self.archive_permissions_spin.value())
+        )
+        self.executable_permissions_spin.valueChanged.connect(
+            lambda: self._update_temp_setting("executable_permissions", self.executable_permissions_spin.value())
+        )
+        self.video_permissions_spin.valueChanged.connect(
+            lambda: self._update_temp_setting("video_permissions", self.video_permissions_spin.value())
+        )
+        self.audio_permissions_spin.valueChanged.connect(
+            lambda: self._update_temp_setting("audio_permissions", self.audio_permissions_spin.value())
+        )
+        self.default_permissions_spin.valueChanged.connect(
+            lambda: self._update_temp_setting("default_permissions", self.default_permissions_spin.value())
+        )
+        self.recursive_permissions_check.toggled.connect(
+            lambda: self._update_temp_setting("recursive_permissions", self.recursive_permissions_check.isChecked())
+        )
+        self.preset_combo.currentTextChanged.connect(self._on_preset_changed)
+        self.preset_combo.currentTextChanged.connect(
+            lambda text: self._update_temp_setting("permissions_preset", text)
+        )
+
+        # Encryption settings connections
+        self.encryption_enabled_check.toggled.connect(
+            lambda: self._update_temp_setting("encryption_enabled", self.encryption_enabled_check.isChecked())
+        )
+        self.encryption_algorithm_combo.currentTextChanged.connect(
+            lambda: self._update_temp_setting("encryption_algorithm", self.encryption_algorithm_combo.currentText())
+        )
+        self.key_iterations_spin.valueChanged.connect(
+            lambda: self._update_temp_setting("key_iterations", self.key_iterations_spin.value())
+        )
+        self.store_passwords_check.toggled.connect(
+            lambda: self._update_temp_setting("store_passwords", self.store_passwords_check.isChecked())
+        )
+        self.auto_verify_check.toggled.connect(
+            lambda: self._update_temp_setting("auto_verify_encrypted", self.auto_verify_check.isChecked())
         )
 
     def _update_temp_setting(self, key: str, value: Any):
@@ -573,12 +745,6 @@ class SettingsDialog(QDialog):
         )
 
         # Text preview settings
-        self.text_font_combo.setCurrentText(
-            self.current_settings.get("text_font_family", "Consolas")
-        )
-        self.text_font_size_spin.setValue(
-            self.current_settings.get("text_font_size", 10)
-        )
         self.tab_width_spin.setValue(
             self.current_settings.get("tab_width", 4)
         )
@@ -589,9 +755,6 @@ class SettingsDialog(QDialog):
         # Image preview settings
         self.custom_zoom_spin.setValue(
             self.current_settings.get("custom_zoom_scale", 1.0)
-        )
-        self.image_bg_combo.setCurrentText(
-            self.current_settings.get("image_background", "White")
         )
 
         # UI settings
@@ -606,6 +769,64 @@ class SettingsDialog(QDialog):
         )
         self.show_hidden_check.setChecked(
             self.current_settings.get("show_hidden_files", False)
+        )
+
+        # Permissions settings
+        self.permissions_enabled_check.setChecked(
+            self.current_settings.get("permissions_enabled", False)
+        )
+        self.directory_permissions_spin.setValue(
+            self.current_settings.get("directory_permissions", 0o755)
+        )
+        self.image_permissions_spin.setValue(
+            self.current_settings.get("image_permissions", 0o644)
+        )
+        self.text_permissions_spin.setValue(
+            self.current_settings.get("text_permissions", 0o644)
+        )
+        self.document_permissions_spin.setValue(
+            self.current_settings.get("document_permissions", 0o644)
+        )
+        self.archive_permissions_spin.setValue(
+            self.current_settings.get("archive_permissions", 0o644)
+        )
+        self.executable_permissions_spin.setValue(
+            self.current_settings.get("executable_permissions", 0o755)
+        )
+        self.video_permissions_spin.setValue(
+            self.current_settings.get("video_permissions", 0o644)
+        )
+        self.audio_permissions_spin.setValue(
+            self.current_settings.get("audio_permissions", 0o644)
+        )
+        self.default_permissions_spin.setValue(
+            self.current_settings.get("default_permissions", 0o644)
+        )
+        self.recursive_permissions_check.setChecked(
+            self.current_settings.get("recursive_permissions", True)
+        )
+        
+        # Load preset
+        preset = self.current_settings.get("permissions_preset", "Standard (Recommended)")
+        self.preset_combo.setCurrentText(preset)
+        if preset != "Custom":
+            self._on_preset_changed(preset)
+
+        # Encryption settings
+        self.encryption_enabled_check.setChecked(
+            self.current_settings.get("encryption_enabled", True)
+        )
+        self.encryption_algorithm_combo.setCurrentText(
+            self.current_settings.get("encryption_algorithm", "AES-256-CBC")
+        )
+        self.key_iterations_spin.setValue(
+            self.current_settings.get("key_iterations", 100000)
+        )
+        self.store_passwords_check.setChecked(
+            self.current_settings.get("store_passwords", True)
+        )
+        self.auto_verify_check.setChecked(
+            self.current_settings.get("auto_verify_encrypted", True)
         )
 
     def get_current_template(self):
@@ -667,8 +888,6 @@ class SettingsDialog(QDialog):
                 self.default_zoom_combo.setCurrentText("Fit to Window")
                 self.show_line_numbers_check.setChecked(True)
                 self.word_wrap_check.setChecked(True)
-                self.text_font_combo.setCurrentText("Consolas")
-                self.text_font_size_spin.setValue(10)
                 self.tab_width_spin.setValue(4)
                 self.max_preview_spin.setValue(1)
             elif current_tab == 2:  # UI tab
@@ -692,6 +911,161 @@ class SettingsDialog(QDialog):
         if reply == QMessageBox.StandardButton.Yes:
             self.temp_settings.clear()
             self._load_current_settings()
+
+    def _on_preset_changed(self, preset_name):
+        """Handle preset selection changes."""
+        if preset_name == "Custom":
+            return  # Allow manual editing
+        
+        # Define preset values
+        presets = {
+            "Secure (Private)": {
+                "directory_permissions": 0o700,
+                "image_permissions": 0o600,
+                "text_permissions": 0o600,
+                "document_permissions": 0o600,
+                "archive_permissions": 0o600,
+                "executable_permissions": 0o700,
+                "video_permissions": 0o600,
+                "audio_permissions": 0o600,
+                "default_permissions": 0o600
+            },
+            "Standard (Recommended)": {
+                "directory_permissions": 0o755,
+                "image_permissions": 0o644,
+                "text_permissions": 0o644,
+                "document_permissions": 0o644,
+                "archive_permissions": 0o644,
+                "executable_permissions": 0o755,
+                "video_permissions": 0o644,
+                "audio_permissions": 0o644,
+                "default_permissions": 0o644
+            },
+            "Shared (Group Access)": {
+                "directory_permissions": 0o775,
+                "image_permissions": 0o664,
+                "text_permissions": 0o664,
+                "document_permissions": 0o664,
+                "archive_permissions": 0o664,
+                "executable_permissions": 0o775,
+                "video_permissions": 0o664,
+                "audio_permissions": 0o664,
+                "default_permissions": 0o664
+            },
+            "Public (Open)": {
+                "directory_permissions": 0o777,
+                "image_permissions": 0o666,
+                "text_permissions": 0o666,
+                "document_permissions": 0o666,
+                "archive_permissions": 0o666,
+                "executable_permissions": 0o777,
+                "video_permissions": 0o666,
+                "audio_permissions": 0o666,
+                "default_permissions": 0o666
+            }
+        }
+        
+        if preset_name in presets:
+            values = presets[preset_name]
+            self.directory_permissions_spin.setValue(values["directory_permissions"])
+            self.image_permissions_spin.setValue(values["image_permissions"])
+            self.text_permissions_spin.setValue(values["text_permissions"])
+            self.document_permissions_spin.setValue(values["document_permissions"])
+            self.archive_permissions_spin.setValue(values["archive_permissions"])
+            self.executable_permissions_spin.setValue(values["executable_permissions"])
+            self.video_permissions_spin.setValue(values["video_permissions"])
+            self.audio_permissions_spin.setValue(values["audio_permissions"])
+            self.default_permissions_spin.setValue(values["default_permissions"])
+
+    def _reset_permissions_to_preset(self):
+        """Reset permissions to the current preset defaults."""
+        current_preset = self.preset_combo.currentText()
+        if current_preset != "Custom":
+            self._on_preset_changed(current_preset)
+        else:
+            # Reset to Standard preset if Custom
+            self.preset_combo.setCurrentText("Standard (Recommended)")
+            self._on_preset_changed("Standard (Recommended)")
+
+    def _create_encryption_tab(self):
+        """Create the Encryption settings tab."""
+        tab_widget = QWidget()
+        layout = QVBoxLayout(tab_widget)
+
+        # Encryption Settings Group
+        encryption_group = QGroupBox("Encryption Settings")
+        encryption_layout = QFormLayout(encryption_group)
+
+        # Default encryption template
+        self.default_encryption_template_combo = QComboBox()
+        self.default_encryption_template_combo.addItems([
+            "Secure Backup", "Daily Work", "Maximum Security", "Custom"
+        ])
+        encryption_layout.addRow("Default Encryption Template:", self.default_encryption_template_combo)
+
+        # Default encryption mode
+        self.default_encryption_mode_combo = QComboBox()
+        self.default_encryption_mode_combo.addItems(["AES-256-CBC", "AES-256-GCM"])
+        encryption_layout.addRow("Default Encryption Mode:", self.default_encryption_mode_combo)
+
+        # Default key derivation iterations
+        self.default_iterations_spinbox = QSpinBox()
+        self.default_iterations_spinbox.setRange(10000, 1000000)
+        self.default_iterations_spinbox.setSingleStep(10000)
+        self.default_iterations_spinbox.setValue(100000)
+        encryption_layout.addRow("Default Key Derivation Iterations:", self.default_iterations_spinbox)
+
+        # Store password in keyring
+        self.store_password_check = QCheckBox("Store passwords in system keyring")
+        self.store_password_check.setChecked(True)
+        encryption_layout.addRow(self.store_password_check)
+
+        # Auto-verify encrypted files
+        self.auto_verify_check = QCheckBox("Auto-verify encrypted files after creation")
+        self.auto_verify_check.setChecked(True)
+        encryption_layout.addRow(self.auto_verify_check)
+
+        layout.addWidget(encryption_group)
+
+        # Advanced Encryption Settings
+        advanced_group = QGroupBox("Advanced Encryption Settings")
+        advanced_layout = QFormLayout(advanced_group)
+
+        # Salt length
+        self.salt_length_spinbox = QSpinBox()
+        self.salt_length_spinbox.setRange(16, 64)
+        self.salt_length_spinbox.setValue(32)
+        advanced_layout.addRow("Salt Length (bytes):", self.salt_length_spinbox)
+
+        # Chunk size for large files
+        self.chunk_size_spinbox = QSpinBox()
+        self.chunk_size_spinbox.setRange(1024, 1024*1024)
+        self.chunk_size_spinbox.setSingleStep(1024)
+        self.chunk_size_spinbox.setValue(64*1024)
+        advanced_layout.addRow("Chunk Size (bytes):", self.chunk_size_spinbox)
+
+        layout.addWidget(advanced_group)
+
+        # Encryption Templates Info
+        info_group = QGroupBox("Encryption Templates")
+        info_layout = QVBoxLayout(info_group)
+        
+        info_text = QTextEdit()
+        info_text.setReadOnly(True)
+        info_text.setPlainText(
+            "Encryption Templates:\n\n"
+            "• Secure Backup: AES-256-CBC, 100,000 iterations, keyring storage\n"
+            "• Daily Work: AES-256-CBC, 50,000 iterations, keyring storage\n"
+            "• Maximum Security: AES-256-GCM, 1,000,000 iterations, no keyring storage\n"
+            "• Custom: User-defined settings\n\n"
+            "AES-256-CBC: Good balance of security and performance\n"
+            "AES-256-GCM: Authenticated encryption with integrity verification"
+        )
+        info_layout.addWidget(info_text)
+        layout.addWidget(info_group)
+
+        layout.addStretch()
+        self.tab_widget.addTab(tab_widget, "Encryption")
 
     def _apply_settings(self):
         """Apply settings without closing dialog."""

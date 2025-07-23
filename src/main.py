@@ -14,7 +14,7 @@ from PySide6.QtCore import Qt
 from typing import List, Tuple
 from PySide6.QtGui import QAction
 
-from widgets import (
+from ui.widgets import (
 FileBrowserPanel,
 PreviewPanel,
 MetadataPanel,
@@ -23,11 +23,12 @@ OrganizationSettings,
 DryRunResultsDialog
 )
 
-from engine import OrganizationEngine
-from worker import OrganizationWorker
-from settings_manager import SettingsManager
-from settings_dialog import SettingsDialog
-from commands import UndoManager, BatchMoveCommand, BatchCopyCommand, CreateFolderCommand, RenameCommand, DeleteCommand
+from core.engine import OrganizationEngine
+from utils.worker import OrganizationWorker
+from utils.settings_manager import SettingsManager
+from ui.settings_dialog import SettingsDialog
+from utils.commands import UndoManager, BatchMoveCommand, BatchCopyCommand, CreateFolderCommand, RenameCommand, DeleteCommand
+from ui.compression_dialog import CompressionDialog
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -224,6 +225,15 @@ class MainWindow(QMainWindow):
         )
         tools_menu.addAction(settings_action)
 
+        # Compression action
+        compress_action = self._create_action(
+            text="&Compress Files...",
+            shortcut=Qt.Key.Key_K | Qt.KeyboardModifier.ControlModifier,
+            slot=self.show_compression_dialog,
+            enabled=True
+        )
+        tools_menu.addAction(compress_action)
+
     def _create_help_menu(self, menu_bar):
         """Create the Help menu with its actions."""
         help_menu = menu_bar.addMenu("&Help")
@@ -257,6 +267,37 @@ class MainWindow(QMainWindow):
             from PySide6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Error", f"Failed to open settings dialog: {e}")
 
+    def show_compression_dialog(self):
+        """Show the compression dialog."""
+        try:
+            # Get selected files from file browser
+            selected_files = self.file_browser_panel.get_selected_files()
+            if not selected_files:
+                from PySide6.QtWidgets import QMessageBox
+                reply = QMessageBox.question(
+                    self, "No Files Selected",
+                    "No files are selected. Would you like to compress the entire current directory?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    current_path = pathlib.Path(self.file_browser_panel.current_path)
+                    if current_path.is_dir():
+                        selected_files = [current_path]
+                    else:
+                        QMessageBox.warning(self, "Warning", "Current directory is not valid.")
+                        return
+                else:
+                    return
+            
+            dialog = CompressionDialog(self, selected_files)
+            if dialog.exec() == CompressionDialog.DialogCode.Accepted:
+                self.statusBar().showMessage("Compression completed successfully", 3000)
+                self.file_browser_panel.refresh_list()
+                
+        except Exception as e:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Error", f"Failed to open compression dialog: {e}")
+
     def on_settings_changed(self, new_settings: dict):
         """Handle settings changes."""
         try:
@@ -284,6 +325,30 @@ class MainWindow(QMainWindow):
             word_wrap = settings.get('word_wrap_default', True)
             if hasattr(self.preview_panel, 'word_wrap_checkbox'):
                 self.preview_panel.word_wrap_checkbox.setChecked(word_wrap)
+
+            # Apply tab width setting to text preview widgets
+            tab_width = settings.get('tab_width', 4)
+            if hasattr(self.preview_panel, 'text_edit'):
+                # Set tab stop width for the main text editor
+                font_metrics = self.preview_panel.text_edit.fontMetrics()
+                tab_stop_width = font_metrics.horizontalAdvance(' ') * tab_width
+                self.preview_panel.text_edit.setTabStopDistance(tab_stop_width)
+            
+            if hasattr(self.preview_panel, 'syntax_text_edit'):
+                # Set tab stop width for the syntax highlighted text editor
+                font_metrics = self.preview_panel.syntax_text_edit.fontMetrics()
+                tab_stop_width = font_metrics.horizontalAdvance(' ') * tab_width
+                self.preview_panel.syntax_text_edit.setTabStopDistance(tab_stop_width)
+
+
+        # Apply file browser settings
+        if hasattr(self, 'file_browser_panel'):
+            # Apply show hidden files setting
+            show_hidden_files = settings.get('show_hidden_files', False)
+            if hasattr(self.file_browser_panel, 'show_hidden_files'):
+                self.file_browser_panel.show_hidden_files = show_hidden_files
+                # Refresh the file list to apply the setting
+                self.file_browser_panel.refresh_list()
 
         # Apply organization settings to the config panel
         if hasattr(self, 'organization_config_panel'):

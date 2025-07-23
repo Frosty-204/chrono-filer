@@ -1,18 +1,18 @@
 # src/engine.py
 import pathlib
 import datetime
-# import os
+import os
 import re
 import mimetypes
 import shutil # For actual file operations
+import stat
 from typing import List, Tuple, Optional, Iterator
 
-# Assuming OrganizationSettings is defined in widgets.py
-# Adjust if you move OrganizationSettings to a models.py
+# Import OrganizationSettings from the UI module
 try:
-    from .widgets import OrganizationSettings
+    from ..ui.widgets import OrganizationSettings
 except ImportError:
-    from widgets import OrganizationSettings
+    from ui.widgets import OrganizationSettings
 
 
 class OrganizationEngine:
@@ -89,6 +89,15 @@ class OrganizationEngine:
                                     shutil.move(str(item), str(current_proposed_target_abs))
                                     operation_verb = "Moved" if self.mode == "organize" else "Renamed"
 
+                                # Apply permissions if enabled
+                                permissions_applied = None
+                                if not self.settings.dry_run:
+                                    target_permissions = self._get_permissions_for_file_type(current_proposed_target_abs)
+                                    if target_permissions is not None:
+                                        recursive = getattr(self.settings, 'recursive_permissions', False)
+                                        if self._apply_permissions(current_proposed_target_abs, target_permissions, recursive):
+                                            permissions_applied = target_permissions
+
                                 if "To be overwritten" in status_message:
                                     status_message = f"Overwritten: {initial_proposed_target_for_status.relative_to(self.output_base_directory)}"
                                 elif "To be renamed to" in status_message:
@@ -96,6 +105,9 @@ class OrganizationEngine:
                                 else:
                                     base_verb = f"{operation_verb} to" if self.mode == "organize" else f"{operation_verb} to"
                                     status_message = f"{base_verb}: {current_proposed_target_abs.relative_to(self.output_base_directory)}"
+                                
+                                if permissions_applied:
+                                    status_message += f" (permissions: {self._format_permissions(permissions_applied)})"
 
                             except shutil.Error as e_shutil:
                                 if "are the same file" in str(e_shutil).lower():
@@ -280,3 +292,49 @@ class OrganizationEngine:
             return source_file.parent.relative_to(self.output_base_directory) / final_path
         else: # organize
             return pathlib.Path(path_str)
+
+    def _apply_permissions(self, file_path: pathlib.Path, permissions: int, recursive: bool = False) -> bool:
+        """Apply POSIX permissions to a file or directory."""
+        try:
+            if recursive and file_path.is_dir():
+                for root, dirs, files in os.walk(file_path):
+                    for name in dirs + files:
+                        item_path = pathlib.Path(root) / name
+                        os.chmod(item_path, permissions)
+            else:
+                os.chmod(file_path, permissions)
+            return True
+        except (OSError, PermissionError) as e:
+            print(f"Error applying permissions to {file_path}: {e}")
+            return False
+
+    def _get_permissions_for_file_type(self, file_path: pathlib.Path) -> Optional[int]:
+        """Get appropriate permissions based on file type and settings."""
+        if not hasattr(self.settings, 'permissions_enabled') or not self.settings.permissions_enabled:
+            return None
+            
+        if file_path.is_dir():
+            return getattr(self.settings, 'directory_permissions', 0o755)
+        
+        # Determine file type category
+        file_category = self._get_detected_file_type_category(file_path)
+        
+        # Map file categories to permission settings
+        permission_map = {
+            "Images": getattr(self.settings, 'image_permissions', 0o644),
+            "TextFiles": getattr(self.settings, 'text_permissions', 0o644),
+            "Documents": getattr(self.settings, 'document_permissions', 0o644),
+            "Archives": getattr(self.settings, 'archive_permissions', 0o644),
+            "Applications": getattr(self.settings, 'executable_permissions', 0o755),
+            "Videos": getattr(self.settings, 'video_permissions', 0o644),
+            "Audio": getattr(self.settings, 'audio_permissions', 0o644),
+            "Spreadsheets": getattr(self.settings, 'document_permissions', 0o644),
+            "Presentations": getattr(self.settings, 'document_permissions', 0o644),
+            "Other": getattr(self.settings, 'default_permissions', 0o644)
+        }
+        
+        return permission_map.get(file_category, 0o644)
+
+    def _format_permissions(self, permissions: int) -> str:
+        """Format permissions as rwxrwxrwx string."""
+        return stat.filemode(permissions)

@@ -72,6 +72,15 @@ class FileBrowserPanel(QWidget):
         super().__init__(parent)
         self.current_path = str(pathlib.Path.home()) # Start in user's home directory
         self.undo_manager = undo_manager
+        self.show_hidden_files = False  # Default to not showing hidden files
+        
+        # Import encryption actions
+        try:
+            from ..file_encryption_actions import FileEncryptionActions
+            self.encryption_actions = FileEncryptionActions(self)
+        except ImportError:
+            self.encryption_actions = None
+            print("Warning: File encryption actions not available")
 
         self.layout = QVBoxLayout(self)
 
@@ -164,6 +173,10 @@ class FileBrowserPanel(QWidget):
             # List directories first, then files
             items_to_add = []
             for entry in path_obj.iterdir():
+                # Filter hidden files based on setting
+                if not self.show_hidden_files and entry.name.startswith('.'):
+                    continue  # Skip hidden files if setting is disabled
+                
                 item = QListWidgetItem(entry.name)
                 item.setData(Qt.ItemDataRole.UserRole, entry) # Store the Path object with the item
 
@@ -248,6 +261,11 @@ class FileBrowserPanel(QWidget):
                 move_action = menu.addAction("Move")
                 move_action.triggered.connect(lambda: self.move_item(path_obj))
 
+                # Encryption actions
+                if self.encryption_actions:
+                    selected_files = [path_obj]
+                    self.encryption_actions.add_encryption_actions(menu, selected_files)
+
         menu.exec(self.item_list_widget.mapToGlobal(position))
 
     def create_folder(self):
@@ -262,7 +280,7 @@ class FileBrowserPanel(QWidget):
 
                 # Add to undo manager if available
                 if self.undo_manager:
-                    from commands import CreateFolderCommand
+                    from ..utils.commands import CreateFolderCommand
                     command = CreateFolderCommand(new_folder_path)
                     self.undo_manager.add_command(command)
 
@@ -287,7 +305,7 @@ class FileBrowserPanel(QWidget):
 
                 # Add to undo manager if available
                 if self.undo_manager:
-                    from commands import RenameCommand
+                    from ..utils.commands import RenameCommand
                     command = RenameCommand(old_path, new_path)
                     self.undo_manager.add_command(command)
 
@@ -392,6 +410,44 @@ class FileBrowserPanel(QWidget):
             path_obj = current_item.data(Qt.ItemDataRole.UserRole)
             if path_obj and path_obj.exists():
                 self.rename_item(path_obj)
+
+    def _is_encrypted_file(self, path_obj: pathlib.Path) -> bool:
+        """Check if a file appears to be encrypted based on extension and signature."""
+        if not path_obj.is_file():
+            return False
+            
+        # Check for encrypted file extensions
+        encrypted_extensions = {'.enc', '.encrypted', '.aes', '.gpg', '.pgp'}
+        if path_obj.suffix.lower() in encrypted_extensions:
+            return True
+            
+        # Check file signature for encrypted files
+        try:
+            with open(path_obj, 'rb') as f:
+                header = f.read(16)
+                # Check for common encrypted file signatures
+                if header.startswith(b'Salted__'):  # OpenSSL encrypted
+                    return True
+                if len(header) >= 8 and header[:8] == b'\x00\x00\x00\x00\x00\x00\x00\x00':  # Some encrypted formats
+                    return True
+        except (IOError, OSError):
+            pass
+            
+        return False
+
+    def get_selected_files(self) -> List[pathlib.Path]:
+        """Get list of selected files and directories from the file browser."""
+        selected_files = []
+        for item in self.item_list_widget.selectedItems():
+            path_obj = item.data(Qt.ItemDataRole.UserRole)
+            if path_obj and path_obj.exists():
+                selected_files.append(path_obj)
+        return selected_files
+
+    def get_current_directory(self) -> pathlib.Path:
+        """Get the current directory path."""
+        return pathlib.Path(self.current_path)
+
 
 # The other placeholder classes remain unchanged for now
 # ... (FileBrowserPanel class above) ...
