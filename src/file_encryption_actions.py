@@ -72,23 +72,15 @@ class FileEncryptionActions(QObject):
             return
         
         password = password_dialog.get_password()
-        template_name = password_dialog.get_template_name()
         
         try:
             success_count = 0
             for file_path in files_to_encrypt:
                 try:
-                    # Get template settings
-                    from utils.encryption_templates import EncryptionTemplateManager
-                    template_manager = EncryptionTemplateManager()
-                    template = template_manager.get_template(template_name)
-                    
-                    # Encrypt file
+                    # Encrypt file with default settings
                     encrypted_path = self.encryption_engine.encrypt_file(
-                        file_path, 
-                        password,
-                        algorithm=template.algorithm,
-                        key_iterations=template.key_iterations
+                        file_path,
+                        password
                     )
                     
                     if encrypted_path:

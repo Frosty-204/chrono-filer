@@ -359,9 +359,7 @@ Phase 2 development is now complete! The application includes all planned advanc
 
 **Known Issues (Deferred to Phase 3):**
 - Syntax highlighting may not render correctly on some desktop environments (Hyprland, light themes)
-- Advanced find functionality (find/replace, regex search) could be enhanced
 - Comprehensive theme system implementation pending
-- File type associations could be expanded
 
 **IX. Testing and Quality Assurance:**
 

@@ -76,11 +76,11 @@ class FileBrowserPanel(QWidget):
         
         # Import encryption actions
         try:
-            from ..file_encryption_actions import FileEncryptionActions
+            from file_encryption_actions import FileEncryptionActions
             self.encryption_actions = FileEncryptionActions(self)
-        except ImportError:
+        except ImportError as e:
             self.encryption_actions = None
-            print("Warning: File encryption actions not available")
+            print(f"Warning: File encryption actions not available: {e}")
 
         self.layout = QVBoxLayout(self)
 
