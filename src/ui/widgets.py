@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QGroupBox, QFormLayout, QComboBox, QDateEdit,
     QSpinBox, QCheckBox, QScrollArea, QDialog,
     QTableWidget, QTableWidgetItem, QAbstractItemView, QMessageBox,
-    QFileDialog, QTabWidget, QMenu, QInputDialog
+    QFileDialog, QTabWidget, QMenu, QInputDialog, QProgressDialog
 
 )
 from PySide6.QtGui import QPalette, QColor, QPixmap, QKeySequence, QShortcut
@@ -76,7 +76,7 @@ class FileBrowserPanel(QWidget):
         
         # Import encryption actions
         try:
-            from file_encryption_actions import FileEncryptionActions
+            from ..file_encryption_actions import FileEncryptionActions
             self.encryption_actions = FileEncryptionActions(self)
         except ImportError as e:
             self.encryption_actions = None
@@ -330,7 +330,7 @@ class FileBrowserPanel(QWidget):
             try:
                 # Create command before deletion for undo support
                 if self.undo_manager:
-                    from commands import DeleteCommand
+                    from ..utils.commands import DeleteCommand
                     command = DeleteCommand(path_obj)
 
                 if path_obj.is_dir():
@@ -364,14 +364,121 @@ class FileBrowserPanel(QWidget):
                 QMessageBox.critical(self, "Error", f"Failed to delete: {e}")
 
     def copy_item(self, path_obj: pathlib.Path):
-        """Copy a file or directory (placeholder for now)."""
-        QMessageBox.information(self, "Feature Coming Soon",
-                               f"Copy operation for '{path_obj.name}' will be implemented in the next update.")
+        """Copy a file or directory to a new location."""
+        try:
+            # Get destination directory
+            dest_dir = QFileDialog.getExistingDirectory(
+                self,
+                f"Select destination for '{path_obj.name}'",
+                str(path_obj.parent)
+            )
+            
+            if not dest_dir:
+                return  # User cancelled
+            
+            dest_path = pathlib.Path(dest_dir) / path_obj.name
+            
+            # Handle existing file
+            if dest_path.exists():
+                reply = QMessageBox.question(
+                    self, "File Exists",
+                    f"'{path_obj.name}' already exists in destination. Overwrite?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
+            
+            # Create progress dialog
+            progress = QProgressDialog("Copying...", "Cancel", 0, 100, self)
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            progress.setAutoClose(True)
+            progress.setMinimumDuration(0)
+            progress.setValue(0)
+            
+            # Perform copy
+            if path_obj.is_dir():
+                progress.setLabelText(f"Copying directory: {path_obj.name}")
+                progress.setValue(10)
+                import shutil
+                shutil.copytree(path_obj, dest_path, dirs_exist_ok=True)
+                progress.setValue(100)
+            else:
+                progress.setLabelText(f"Copying: {path_obj.name}")
+                progress.setValue(25)
+                import shutil
+                shutil.copy2(path_obj, dest_path)
+                progress.setValue(100)
+            
+            # Create command for undo support
+            if self.undo_manager:
+                from ..utils.commands import BatchCopyCommand
+                command = BatchCopyCommand([(path_obj, dest_path)])
+                self.undo_manager.add_command(command)
+
+            self.refresh_list()
+            self.status_message.emit(f"'{path_obj.name}' copied successfully.")
+            if not progress.wasCanceled():
+                QMessageBox.information(self, "Success", f"'{path_obj.name}' copied successfully.")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to copy '{path_obj.name}': {e}")
 
     def move_item(self, path_obj: pathlib.Path):
-        """Move a file or directory (placeholder for now)."""
-        QMessageBox.information(self, "Feature Coming Soon",
-                               f"Move operation for '{path_obj.name}' will be implemented in the next update.")
+        """Move a file or directory to a new location."""
+        try:
+            # Get destination directory
+            dest_dir = QFileDialog.getExistingDirectory(
+                self,
+                f"Select destination for '{path_obj.name}'",
+                str(path_obj.parent)
+            )
+            
+            if not dest_dir:
+                return  # User cancelled
+            
+            dest_path = pathlib.Path(dest_dir) / path_obj.name
+            
+            # Handle existing file
+            if dest_path.exists():
+                reply = QMessageBox.question(
+                    self, "File Exists",
+                    f"'{path_obj.name}' already exists in destination. Overwrite?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
+            
+            # Create progress dialog
+            progress = QProgressDialog("Moving...", "Cancel", 0, 100, self)
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            progress.setAutoClose(True)
+            progress.setMinimumDuration(0)
+            progress.setValue(0)
+            
+            # Create command for undo support
+            if self.undo_manager:
+                from ..utils.commands import BatchMoveCommand
+                command = BatchMoveCommand([(path_obj, dest_path)])
+            
+            # Perform move
+            progress.setLabelText(f"Moving: {path_obj.name}")
+            progress.setValue(25)
+            path_obj.rename(dest_path)
+            progress.setValue(100)
+            
+            # Add to undo manager if available
+            if self.undo_manager:
+                self.undo_manager.add_command(command)
+            
+            self.refresh_list()
+            self.status_message.emit(f"'{path_obj.name}' moved successfully.")
+            if not progress.wasCanceled():
+                QMessageBox.information(self, "Success", f"'{path_obj.name}' moved successfully.")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to move '{path_obj.name}': {e}")
 
     def _setup_shortcuts(self):
         """Setup keyboard shortcuts for file operations."""
