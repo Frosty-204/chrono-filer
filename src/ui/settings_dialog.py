@@ -1,5 +1,6 @@
 # src/settings_dialog.py
 import pathlib
+import os
 from typing import Dict, Any, Optional
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget,
@@ -260,7 +261,7 @@ class SettingsDialog(QDialog):
 
         # Theme
         self.theme_combo = QComboBox()
-        self.theme_combo.addItems(["System Default", "Light", "Dark"])
+        self.theme_combo.addItems(["System Default", "Material Design", "Material Dark", "High Contrast"])
         appearance_layout.addRow("Theme:", self.theme_combo)
 
         # Icon size
@@ -714,7 +715,7 @@ class SettingsDialog(QDialog):
             self.current_settings.get("remember_window_geometry", True)
         )
         self.theme_combo.setCurrentText(
-            self.current_settings.get("theme", "System Default")
+            self.current_settings.get("theme", "Material Design")
         )
         self.confirm_delete_check.setChecked(
             self.current_settings.get("confirm_delete", True)
