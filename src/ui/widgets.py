@@ -76,7 +76,7 @@ class FileBrowserPanel(QWidget):
         
         # Import encryption actions
         try:
-            from ..file_encryption_actions import FileEncryptionActions
+            from file_encryption_actions import FileEncryptionActions
             self.encryption_actions = FileEncryptionActions(self)
         except ImportError as e:
             self.encryption_actions = None
@@ -280,7 +280,7 @@ class FileBrowserPanel(QWidget):
 
                 # Add to undo manager if available
                 if self.undo_manager:
-                    from ..utils.commands import CreateFolderCommand
+                    from utils.commands import CreateFolderCommand
                     command = CreateFolderCommand(new_folder_path)
                     self.undo_manager.add_command(command)
 
@@ -305,7 +305,7 @@ class FileBrowserPanel(QWidget):
 
                 # Add to undo manager if available
                 if self.undo_manager:
-                    from ..utils.commands import RenameCommand
+                    from utils.commands import RenameCommand
                     command = RenameCommand(old_path, new_path)
                     self.undo_manager.add_command(command)
 
@@ -330,7 +330,7 @@ class FileBrowserPanel(QWidget):
             try:
                 # Create command before deletion for undo support
                 if self.undo_manager:
-                    from ..utils.commands import DeleteCommand
+                    from utils.commands import DeleteCommand
                     command = DeleteCommand(path_obj)
 
                 if path_obj.is_dir():
@@ -412,7 +412,7 @@ class FileBrowserPanel(QWidget):
             
             # Create command for undo support
             if self.undo_manager:
-                from ..utils.commands import BatchCopyCommand
+                from utils.commands import BatchCopyCommand
                 command = BatchCopyCommand([(path_obj, dest_path)])
                 self.undo_manager.add_command(command)
 
@@ -459,7 +459,7 @@ class FileBrowserPanel(QWidget):
             
             # Create command for undo support
             if self.undo_manager:
-                from ..utils.commands import BatchMoveCommand
+                from utils.commands import BatchMoveCommand
                 command = BatchMoveCommand([(path_obj, dest_path)])
             
             # Perform move

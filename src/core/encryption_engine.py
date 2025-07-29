@@ -217,7 +217,7 @@ class EncryptionEngine:
         Returns:
             Path to the encrypted archive
         """
-        from src.compression_engine import CompressionEngine
+        from compression_engine import CompressionEngine
         
         # Create temporary archive
         compression_engine = CompressionEngine()

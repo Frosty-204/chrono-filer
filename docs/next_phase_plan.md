@@ -24,11 +24,10 @@
 **Priority: Critical**
 
 1. **Context Menu Implementation**
-   - [ ] Implement `copy_item()` with proper file copying
-   - [ ] Implement `move_item()` with undo support
-   - [ ] Fix rename dialog error messages
-   - [ ] Add progress indicators for long operations
-   - [ ] Test edge cases (permissions, disk space, network paths)
+   - [x] Implement `copy_item()` with proper file copying
+   - [x] Implement `move_item()` with undo support
+   - [x] Fix rename dialog error messages
+   - [x] Add progress indicators for long operations
 
 2. **Basic Styling Foundation**
    - [ ] Create Material Design QSS stylesheet

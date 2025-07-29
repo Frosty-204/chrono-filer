@@ -9,10 +9,7 @@ import stat
 from typing import List, Tuple, Optional, Iterator
 
 # Import OrganizationSettings from the UI module
-try:
-    from ..ui.widgets import OrganizationSettings
-except ImportError:
-    from ui.widgets import OrganizationSettings
+from ui.widgets import OrganizationSettings
 
 
 class OrganizationEngine:
