@@ -389,8 +389,11 @@ class MainWindow(QMainWindow):
         # Apply UI settings
         theme = settings.get('theme', 'System Default')
         if theme != 'System Default':
-            # Apply theme (this would need theme implementation)
-            pass
+            # Apply theme using ThemeManager
+            from ui.theme_manager import ThemeManager
+            if not hasattr(self, 'theme_manager'):
+                self.theme_manager = ThemeManager()
+            self.theme_manager.set_theme(theme)
 
         # Apply undo manager settings
         undo_history_size = settings.get('undo_history_size', 50)

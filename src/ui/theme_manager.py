@@ -1,69 +1,62 @@
-"""Theme Manager for Chrono Filer - Material Design Theme System"""
+"""Theme Manager for Chrono Filer - Fusion Style Theme System"""
 
 import os
 from typing import Dict, Any
-from PyQt6.QtCore import QObject, pyqtSignal
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtGui import QPalette, QColor
+from PySide6.QtCore import QObject, Signal
+from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QPalette, QColor
 
 
 class ThemeManager(QObject):
     """Manages application themes and styling"""
     
-    theme_changed = pyqtSignal(str)  # Emitted when theme changes
+    theme_changed = Signal(str)  # Emitted when theme changes
     
     def __init__(self):
         super().__init__()
-        self.current_theme = 'material'
+        self.current_theme = 'light'
         self.themes = {
-            'material': {
-                'name': 'Material Design',
-                'stylesheet': 'src/ui/styles/material.qss',
+            'light': {
+                'name': 'Light',
+                'stylesheet': 'src/ui/styles/fusion_light.qss',
                 'colors': {
-                    'primary': '#1976D2',
-                    'secondary': '#03DAC6',
-                    'background': '#FAFAFA',
-                    'surface': '#FFFFFF',
-                    'error': '#B00020',
-                    'on_primary': '#FFFFFF',
-                    'on_secondary': '#000000',
-                    'on_background': '#212121',
-                    'on_surface': '#212121',
-                    'on_error': '#FFFFFF'
+                    'primary': '#2563eb',
+                    'secondary': '#64748b',
+                    'accent': '#06b6d4',
+                    'background': '#ffffff',
+                    'surface': '#f8fafc',
+                    'surface-variant': '#f1f5f9',
+                    'error': '#ef4444',
+                    'warning': '#f59e0b',
+                    'success': '#10b981',
+                    'text-primary': '#0f172a',
+                    'text-secondary': '#475569',
+                    'text-muted': '#94a3b8',
+                    'border': '#e2e8f0',
+                    'border-light': '#f1f5f9'
                 }
             },
             'dark': {
-                'name': 'Material Dark',
-                'stylesheet': 'src/ui/styles/material_dark.qss',
+                'name': 'Dark',
+                'stylesheet': 'src/ui/styles/fusion_dark.qss',
                 'colors': {
-                    'primary': '#BB86FC',
-                    'secondary': '#03DAC6',
-                    'background': '#121212',
-                    'surface': '#1E1E1E',
-                    'error': '#CF6679',
-                    'on_primary': '#000000',
-                    'on_secondary': '#000000',
-                    'on_background': '#FFFFFF',
-                    'on_surface': '#FFFFFF',
-                    'on_error': '#000000'
+                    'primary': '#3b82f6',
+                    'secondary': '#64748b',
+                    'accent': '#06b6d4',
+                    'background': '#0f172a',
+                    'surface': '#1e293b',
+                    'surface-variant': '#334155',
+                    'error': '#ef4444',
+                    'warning': '#f59e0b',
+                    'success': '#10b981',
+                    'text-primary': '#f8fafc',
+                    'text-secondary': '#cbd5e1',
+                    'text-muted': '#64748b',
+                    'border': '#334155',
+                    'border-light': '#475569'
                 }
             },
-            'high_contrast': {
-                'name': 'High Contrast',
-                'stylesheet': 'src/ui/styles/high_contrast.qss',
-                'colors': {
-                    'primary': '#000000',
-                    'secondary': '#FFFFFF',
-                    'background': '#FFFFFF',
-                    'surface': '#FFFFFF',
-                    'error': '#000000',
-                    'on_primary': '#FFFFFF',
-                    'on_secondary': '#000000',
-                    'on_background': '#000000',
-                    'on_surface': '#000000',
-                    'on_error': '#FFFFFF'
-                }
-            }
+            # High contrast theme removed - only light/dark themes supported
         }
     
     def get_available_themes(self) -> Dict[str, str]:
@@ -92,8 +85,6 @@ class ThemeManager(QObject):
         # Apply palette based on theme
         if theme_name == 'dark':
             self._apply_dark_palette()
-        elif theme_name == 'high_contrast':
-            self._apply_high_contrast_palette()
         else:
             self._apply_light_palette()
         
@@ -113,19 +104,19 @@ class ThemeManager(QObject):
         palette = QPalette()
         
         # Set colors for light theme
-        palette.setColor(QPalette.ColorRole.Window, QColor("#FAFAFA"))
-        palette.setColor(QPalette.ColorRole.WindowText, QColor("#212121"))
-        palette.setColor(QPalette.ColorRole.Base, QColor("#FFFFFF"))
-        palette.setColor(QPalette.ColorRole.AlternateBase, QColor("#F5F5F5"))
-        palette.setColor(QPalette.ColorRole.ToolTipBase, QColor("#424242"))
-        palette.setColor(QPalette.ColorRole.ToolTipText, QColor("#FFFFFF"))
-        palette.setColor(QPalette.ColorRole.Text, QColor("#212121"))
-        palette.setColor(QPalette.ColorRole.Button, QColor("#F5F5F5"))
-        palette.setColor(QPalette.ColorRole.ButtonText, QColor("#212121"))
-        palette.setColor(QPalette.ColorRole.BrightText, QColor("#FFFFFF"))
-        palette.setColor(QPalette.ColorRole.Link, QColor("#1976D2"))
-        palette.setColor(QPalette.ColorRole.Highlight, QColor("#1976D2"))
-        palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#FFFFFF"))
+        palette.setColor(QPalette.ColorRole.Window, QColor("#ffffff"))
+        palette.setColor(QPalette.ColorRole.WindowText, QColor("#0f172a"))
+        palette.setColor(QPalette.ColorRole.Base, QColor("#ffffff"))
+        palette.setColor(QPalette.ColorRole.AlternateBase, QColor("#f8fafc"))
+        palette.setColor(QPalette.ColorRole.ToolTipBase, QColor("#1e293b"))
+        palette.setColor(QPalette.ColorRole.ToolTipText, QColor("#f8fafc"))
+        palette.setColor(QPalette.ColorRole.Text, QColor("#0f172a"))
+        palette.setColor(QPalette.ColorRole.Button, QColor("#f8fafc"))
+        palette.setColor(QPalette.ColorRole.ButtonText, QColor("#0f172a"))
+        palette.setColor(QPalette.ColorRole.BrightText, QColor("#ffffff"))
+        palette.setColor(QPalette.ColorRole.Link, QColor("#2563eb"))
+        palette.setColor(QPalette.ColorRole.Highlight, QColor("#2563eb"))
+        palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#ffffff"))
         
         app.setPalette(palette)
     
@@ -135,41 +126,19 @@ class ThemeManager(QObject):
         palette = QPalette()
         
         # Set colors for dark theme
-        palette.setColor(QPalette.ColorRole.Window, QColor("#121212"))
-        palette.setColor(QPalette.ColorRole.WindowText, QColor("#FFFFFF"))
-        palette.setColor(QPalette.ColorRole.Base, QColor("#1E1E1E"))
-        palette.setColor(QPalette.ColorRole.AlternateBase, QColor("#2C2C2C"))
-        palette.setColor(QPalette.ColorRole.ToolTipBase, QColor("#FFFFFF"))
-        palette.setColor(QPalette.ColorRole.ToolTipText, QColor("#121212"))
-        palette.setColor(QPalette.ColorRole.Text, QColor("#FFFFFF"))
-        palette.setColor(QPalette.ColorRole.Button, QColor("#2C2C2C"))
-        palette.setColor(QPalette.ColorRole.ButtonText, QColor("#FFFFFF"))
-        palette.setColor(QPalette.ColorRole.BrightText, QColor("#FFFFFF"))
-        palette.setColor(QPalette.ColorRole.Link, QColor("#BB86FC"))
-        palette.setColor(QPalette.ColorRole.Highlight, QColor("#BB86FC"))
-        palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#000000"))
-        
-        app.setPalette(palette)
-    
-    def _apply_high_contrast_palette(self):
-        """Apply high contrast theme palette"""
-        app = QApplication.instance()
-        palette = QPalette()
-        
-        # Set colors for high contrast theme
-        palette.setColor(QPalette.ColorRole.Window, QColor("#FFFFFF"))
-        palette.setColor(QPalette.ColorRole.WindowText, QColor("#000000"))
-        palette.setColor(QPalette.ColorRole.Base, QColor("#FFFFFF"))
-        palette.setColor(QPalette.ColorRole.AlternateBase, QColor("#F0F0F0"))
-        palette.setColor(QPalette.ColorRole.ToolTipBase, QColor("#000000"))
-        palette.setColor(QPalette.ColorRole.ToolTipText, QColor("#FFFFFF"))
-        palette.setColor(QPalette.ColorRole.Text, QColor("#000000"))
-        palette.setColor(QPalette.ColorRole.Button, QColor("#FFFFFF"))
-        palette.setColor(QPalette.ColorRole.ButtonText, QColor("#000000"))
-        palette.setColor(QPalette.ColorRole.BrightText, QColor("#FFFFFF"))
-        palette.setColor(QPalette.ColorRole.Link, QColor("#0000FF"))
-        palette.setColor(QPalette.ColorRole.Highlight, QColor("#000000"))
-        palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#FFFFFF"))
+        palette.setColor(QPalette.ColorRole.Window, QColor("#0f172a"))
+        palette.setColor(QPalette.ColorRole.WindowText, QColor("#f8fafc"))
+        palette.setColor(QPalette.ColorRole.Base, QColor("#1e293b"))
+        palette.setColor(QPalette.ColorRole.AlternateBase, QColor("#334155"))
+        palette.setColor(QPalette.ColorRole.ToolTipBase, QColor("#f8fafc"))
+        palette.setColor(QPalette.ColorRole.ToolTipText, QColor("#0f172a"))
+        palette.setColor(QPalette.ColorRole.Text, QColor("#f8fafc"))
+        palette.setColor(QPalette.ColorRole.Button, QColor("#1e293b"))
+        palette.setColor(QPalette.ColorRole.ButtonText, QColor("#f8fafc"))
+        palette.setColor(QPalette.ColorRole.BrightText, QColor("#ffffff"))
+        palette.setColor(QPalette.ColorRole.Link, QColor("#3b82f6"))
+        palette.setColor(QPalette.ColorRole.Highlight, QColor("#3b82f6"))
+        palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#0f172a"))
         
         app.setPalette(palette)
     
@@ -182,5 +151,5 @@ class ThemeManager(QObject):
     
     def load_settings(self, settings: Dict[str, Any]):
         """Load theme settings from configuration"""
-        theme_name = settings.get('current_theme', 'material')
+        theme_name = settings.get('current_theme', 'light')
         self.set_theme(theme_name)
