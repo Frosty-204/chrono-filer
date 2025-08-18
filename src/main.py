@@ -1,6 +1,7 @@
 # src/main.py
 import sys
 import pathlib
+import qtawesome as qta
 
 from PySide6.QtWidgets import (
     QApplication,
@@ -38,6 +39,13 @@ class MainWindow(QMainWindow):
         self.settings_manager = SettingsManager()
         self.setWindowTitle("Chrono Filer - v0.1.0")
         self.setGeometry(100, 100, 1280, 800)
+
+        # Initialize icon manager before creating panels
+        from ui.icon_manager import IconManager
+        import ui.icon_manager as icon_manager_module
+        icon_manager_module.icon_manager = IconManager()
+
+        # QtAwesome fonts are loaded automatically - no need for custom font loading
 
         # Create panels first
         self._create_panels()

@@ -6,6 +6,8 @@ from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QPalette, QColor
 
+from .icon_manager import IconManager
+
 
 class ThemeManager(QObject):
     """Manages application themes and styling"""
@@ -15,6 +17,7 @@ class ThemeManager(QObject):
     def __init__(self):
         super().__init__()
         self.current_theme = 'light'
+        self.icon_manager = IconManager()
         self.themes = {
             'light': {
                 'name': 'Light',
@@ -74,6 +77,9 @@ class ThemeManager(QObject):
         
         self.current_theme = theme_name
         theme = self.themes[theme_name]
+        
+        # Update icon manager theme
+        self.icon_manager.set_theme(theme_name)
         
         # Load stylesheet
         stylesheet_path = theme['stylesheet']
@@ -153,3 +159,15 @@ class ThemeManager(QObject):
         """Load theme settings from configuration"""
         theme_name = settings.get('current_theme', 'light')
         self.set_theme(theme_name)
+    
+    def get_icon(self, icon_name: str, color: str = None) -> Any:
+        """Get a theme-aware icon from the icon manager"""
+        return self.icon_manager.get_icon(icon_name, color)
+
+    def get_standard_icon(self, standard_type: str) -> Any:
+        """Get a standard icon for common actions"""
+        return self.icon_manager.get_standard_icon(standard_type)
+    
+    def get_color(self, color_key: str) -> str:
+        """Get a specific color from the current theme (alias for get_theme_color)"""
+        return self.get_theme_color(color_key)

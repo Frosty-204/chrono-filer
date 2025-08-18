@@ -87,8 +87,17 @@ class FileBrowserPanel(QWidget):
         # Path navigation bar
         nav_bar_layout = QHBoxLayout()
         self.up_button = QPushButton()
-        # Using a standard icon
-        self.up_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogToParent))
+        # Using theme-aware icons - lazy import to avoid initialization issues
+        try:
+            from ui.icon_manager import icon_manager
+            if icon_manager is not None:
+                self.up_button.setIcon(icon_manager.get_icon('up'))
+            else:
+                # Fallback to standard icon
+                self.up_button.setText("↑")
+        except (ImportError, NameError):
+            # Fallback to standard icon
+            self.up_button.setText("↑")
         self.up_button.setToolTip("Go to parent directory")
 
         self.path_edit = QLineEdit(self.current_path)
@@ -101,12 +110,22 @@ class FileBrowserPanel(QWidget):
         toolbar_layout = QHBoxLayout()
 
         self.create_folder_button = QPushButton("New Folder")
-        self.create_folder_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder))
+        try:
+            from ui.icon_manager import icon_manager
+            if icon_manager is not None:
+                self.create_folder_button.setIcon(icon_manager.get_icon('folder'))
+        except (ImportError, NameError):
+            pass  # Use text-only button
         self.create_folder_button.setToolTip("Create new folder")
         self.create_folder_button.clicked.connect(self.create_folder)
 
         self.refresh_button = QPushButton("Refresh")
-        self.refresh_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload))
+        try:
+            from ui.icon_manager import icon_manager
+            if icon_manager is not None:
+                self.refresh_button.setIcon(icon_manager.get_icon('refresh'))
+        except (ImportError, NameError):
+            pass  # Use text-only button
         self.refresh_button.setToolTip("Refresh file list")
         self.refresh_button.clicked.connect(self.refresh_list)
 
@@ -180,11 +199,20 @@ class FileBrowserPanel(QWidget):
                 item = QListWidgetItem(entry.name)
                 item.setData(Qt.ItemDataRole.UserRole, entry) # Store the Path object with the item
 
-                icon_type = QStyle.StandardPixmap.SP_FileIcon
-                if entry.is_dir():
-                    icon_type = QStyle.StandardPixmap.SP_DirIcon
+                # Safe icon loading
+                try:
+                    from ui.icon_manager import icon_manager
+                    if icon_manager is not None:
+                        if entry.is_dir():
+                            icon = icon_manager.get_icon('folder')
+                        else:
+                            icon = icon_manager.get_icon('file')
+                    else:
+                        icon = None
+                except (ImportError, NameError):
+                    icon = None
 
-                item.setIcon(self.style().standardIcon(icon_type))
+                item.setIcon(icon)
                 items_to_add.append((entry.is_dir(), item)) # Tuple for sorting: (is_dir, item)
 
             # Sort: directories first (True > False), then by name alphabetically
@@ -1619,7 +1647,10 @@ class OrganizationConfigPanel(QWidget):
         self.structure_preset_combo.setCurrentText(default_preset_key)
         template_edit_layout.addWidget(self.structure_template_edit)
         self.template_info_button = QPushButton()
-        self.template_info_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxInformation))
+        if hasattr(self, 'theme_manager') and self.theme_manager:
+            self.template_info_button.setIcon(self.theme_manager.get_icon('info-circle'))
+        else:
+            self.template_info_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxInformation))
         self.template_info_button.setToolTip("Show available template placeholders")
         template_edit_layout.addWidget(self.template_info_button)
         output_layout.addLayout(template_edit_layout)
@@ -1685,7 +1716,10 @@ class OrganizationConfigPanel(QWidget):
         self.rename_preset_combo.setCurrentText(default_preset_key)
         template_edit_layout.addWidget(self.rename_template_edit)
         self.rename_template_info_button = QPushButton()
-        self.rename_template_info_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxInformation))
+        if hasattr(self, 'theme_manager') and self.theme_manager:
+            self.rename_template_info_button.setIcon(self.theme_manager.get_icon('info-circle'))
+        else:
+            self.rename_template_info_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxInformation))
         self.rename_template_info_button.setToolTip("Show available template placeholders")
         template_edit_layout.addWidget(self.rename_template_info_button)
         rename_layout.addLayout(template_edit_layout)
